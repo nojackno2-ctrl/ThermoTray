@@ -1,0 +1,15 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+[Tt]est[Rr]esults/
+
+# Visual Studio / user state
+.vs/
+*.user
+*.suo
+
+# Local application settings
+ThermoTray.settings.json
+
