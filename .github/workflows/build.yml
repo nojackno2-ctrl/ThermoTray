@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          if (-not $version) { throw 'Version is not defined in Directory.Build.props' }
+          "AppVersion=$version" >> $env:GITHUB_ENV
+
+      - run: dotnet restore ThermoTray.sln
+      - run: dotnet build ThermoTray.sln --configuration Release --no-restore
+      - run: dotnet test ThermoTray.sln --configuration Release --no-build
+      - run: dotnet format ThermoTray.sln --verify-no-changes --no-restore --verbosity minimal
+
+      - run: dotnet publish src/ThermoTray/ThermoTray.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output publish/win-x64
+      - run: choco install innosetup --no-progress --yes
+      - run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:AppVersion installer\ThermoTray.iss'
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThermoTray-win-x64
+          path: publish/win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThermoTray-installer
+          path: artifacts/installer/ThermoTray-Setup-${{ env.AppVersion }}.exe
