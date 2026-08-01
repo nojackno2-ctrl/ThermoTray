@@ -31,8 +31,10 @@ public sealed class TrayIconService : IDisposable
         _viewModel = viewModel;
         _showMainWindow = showMainWindow;
         _exitApplication = exitApplication;
-        _cpuNotifyIcon = CreateNotifyIcon();
+        // The notification area puts the most recently registered icon leftmost, so register
+        // GPU first to end up with CPU on the left and GPU on the right.
         _gpuNotifyIcon = CreateNotifyIcon();
+        _cpuNotifyIcon = CreateNotifyIcon();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         UpdateCpuIcon();
         UpdateGpuIcon();
