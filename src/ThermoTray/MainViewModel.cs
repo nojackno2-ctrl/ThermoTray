@@ -71,6 +71,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public Localizer T => _localizer;
 
+    /// <summary>
+    /// The product version as a user reads it. Neither underlying value is shown verbatim: the assembly
+    /// version's fourth component is always zero, and the informational version carries the commit hash.
+    /// </summary>
+    public string Version { get; } = FormatVersion(typeof(MainViewModel).Assembly.GetName().Version);
+
     public string CpuTemperature
     {
         get => _cpuTemperature;
@@ -332,6 +338,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private TimeSpan CurrentPollingInterval => GetPollingInterval(_isWindowVisible);
 
+    /// <summary>
+    /// Three components, because that is what <c>Directory.Build.props</c> sets and what every release
+    /// and installer is named after. An absent component reads as zero rather than as <c>-1</c>.
+    /// </summary>
+    internal static string FormatVersion(Version? version) => version is null
+        ? string.Empty
+        : $"v{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
+
     internal static TimeSpan GetPollingInterval(bool isWindowVisible) =>
         isWindowVisible ? VisiblePollingInterval : HiddenPollingInterval;
 
@@ -494,12 +508,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Recreates the logon task when the saved preference says startup is enabled but the task is
-    /// gone, which is what an upgrade from the old <c>HKCU\Run</c> entry leaves behind.
+    /// Registers the logon task when the saved preference says startup is enabled but the task is gone,
+    /// which is what an upgrade from the old <c>HKCU\Run</c> entry leaves behind, or still carries an
+    /// older definition, which is what an upgrade from a version that let Task Scheduler terminate
+    /// ThermoTray leaves behind.
     /// </summary>
     private void ReconcileStartupSetting()
     {
-        if (!_settings.StartWithWindows || _startupService.IsEnabled() || TrySetStartupEnabled(true))
+        if (!_settings.StartWithWindows || _startupService.IsUpToDate() || TrySetStartupEnabled(true))
         {
             return;
         }

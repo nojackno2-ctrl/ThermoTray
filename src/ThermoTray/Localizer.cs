@@ -32,6 +32,21 @@ public sealed class Localizer
             ["StartupError"] = ("無法更新開機啟動設定。", "Could not update the startup setting."),
             ["SensorError"] = ("讀取硬體感測器時發生錯誤。", "An error occurred while reading hardware sensors."),
             ["OpenLinkError"] = ("無法開啟瀏覽器，請手動前往下列網址：", "Could not open a browser. Visit this address manually:"),
+            ["AlreadyRunning"] = (
+                "ThermoTray 已在執行中。請從系統匣圖示開啟主視窗。",
+                "ThermoTray is already running. Open its window from the notification area."),
+            ["LegacyInstanceRunning"] = (
+                "ThermoTray 已在執行中，但沒有回應接手要求（通常表示它是 1.1.3 之前的版本），因此改為顯示它的視窗。若要改用 {1}，請先從系統匣圖示結束執行中的版本。",
+                "ThermoTray is already running but did not answer the hand-over request, which usually means it predates 1.1.3, so its window was shown instead. To use {1}, exit the running version from the notification area first."),
+            ["NewerInstanceRunning"] = (
+                "已在執行較新的 ThermoTray {0}，將顯示該版本的視窗。您啟動的是 {1}。",
+                "A newer ThermoTray {0} is already running and its window will be shown. You started {1}."),
+            ["ReplaceRunningInstance"] = (
+                "偵測到 ThermoTray {0} 正在執行，您啟動的是 {1}。要關閉執行中的版本並改用這一個嗎？",
+                "ThermoTray {0} is already running and you started {1}. Close the running version and use this one instead?"),
+            ["ReplaceFailed"] = (
+                "無法關閉執行中的 ThermoTray {0}。請從系統匣圖示結束它，然後再啟動這個版本。",
+                "Could not close the running ThermoTray {0}. Exit it from the notification area, then start this version again."),
         };
 
     public Localizer(string language) => Language = Normalize(language);

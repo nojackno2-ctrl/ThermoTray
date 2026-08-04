@@ -1,23 +1,26 @@
+using System.Globalization;
 using System.Windows;
+using System.Windows.Interop;
 using System.Text;
 using System.IO;
-using System.Threading;
 
 namespace ThermoTray;
 
 public partial class App : System.Windows.Application
 {
-    // Session-local names: every instance runs elevated in the same session, so a wider scope
-    // would only invite name collisions with other sessions.
-    private const string SingleInstanceMutexName = "Local\\ThermoTray.SingleInstance";
-    private const string ShowWindowEventName = "Local\\ThermoTray.ShowWindow";
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan HandoverTimeout = TimeSpan.FromSeconds(10);
 
-    private Mutex? _singleInstanceMutex;
-    private EventWaitHandle? _showWindowSignal;
-    private RegisteredWaitHandle? _showWindowRegistration;
+    private InstanceCoordinator? _coordinator;
+    private Localizer? _messages;
     private TrayIconService? _trayIcon;
     private MainViewModel? _viewModel;
     private bool _isShuttingDown;
+
+    private static Version? ProductVersion => typeof(App).Assembly.GetName().Version;
+
+    /// <summary>Loaded on demand: the common startup path never shows one of these messages.</summary>
+    private Localizer Messages => _messages ??= new Localizer(new SettingsService().Load().Language);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -30,10 +33,11 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (!TryClaimSingleInstance())
+        // Starting minimized never shows the window, which avoids a visible flash at logon.
+        var startedMinimized = e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase);
+
+        if (!TryBecomeTheRunningInstance(startedMinimized))
         {
-            // A second set of tray icons polling the same hardware helps nobody; hand over instead.
-            SignalRunningInstance();
             Shutdown();
             return;
         }
@@ -54,77 +58,110 @@ public partial class App : System.Windows.Application
         MainWindow = window;
         viewModel.Start();
 
-        // Starting minimized never shows the window, which avoids a visible flash at logon.
-        if (!e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase))
+        if (!startedMinimized)
         {
             window.Show();
         }
     }
 
-    private bool TryClaimSingleInstance()
+    /// <summary>
+    /// A second set of tray icons polling the same hardware helps nobody, so exactly one instance
+    /// runs. Reports whether this process is the one that continues.
+    /// </summary>
+    private bool TryBecomeTheRunningInstance(bool startedMinimized)
     {
-        try
+        _coordinator = InstanceCoordinator.TryClaim(ProductVersion, PostShowMainWindow, PostExitApplication);
+        return _coordinator is not null || TryTakeOverFromRunningInstance(startedMinimized);
+    }
+
+    private bool TryTakeOverFromRunningInstance(bool startedMinimized)
+    {
+        using var client = InstanceClient.TryConnect(InstanceCoordinator.PipeName, ConnectTimeout);
+
+        if (client is null)
         {
-            _singleInstanceMutex = new Mutex(initiallyOwned: false, SingleInstanceMutexName, out var isFirstInstance);
-            if (isFirstInstance)
+            // An instance that cannot be reached over the pipe predates it. Raising its window is the
+            // only hand-over such a build understands, so an upgrade cannot take the tray from it and
+            // the user has to be told why their new build appeared to do nothing.
+            var raised = InstanceCoordinator.TrySignalLegacyInstance();
+
+            if (!startedMinimized)
             {
-                RegisterShowWindowSignal();
-                return true;
+                ShowMessage(
+                    raised ? Format("LegacyInstanceRunning", runningVersion: null) : Messages["AlreadyRunning"],
+                    MessageBoxImage.Information);
             }
 
-            _singleInstanceMutex.Dispose();
-            _singleInstanceMutex = null;
             return false;
         }
-        catch (Exception exception) when (exception is UnauthorizedAccessException
-            or IOException
-            or WaitHandleCannotBeOpenedException)
+
+        // A logon launch must never stop at a modal prompt nobody is there to answer, whichever
+        // version turns out to be running, so it always degrades to a silent hand-over.
+        var action = startedMinimized
+            ? InstanceAction.ShowRunning
+            : InstanceProtocol.Decide(client.RunningVersion, ProductVersion);
+
+        switch (action)
         {
-            // Without the guard a duplicate instance becomes possible, which beats refusing to start.
-            return true;
+            case InstanceAction.ReplaceRunning when ConfirmReplacement(client.RunningVersion):
+                return TryReplace(client);
+
+            case InstanceAction.ShowNewerRunning:
+                ShowMessage(Format("NewerInstanceRunning", client.RunningVersion), MessageBoxImage.Information);
+                break;
         }
+
+        HandOver(client);
+        return false;
     }
 
-    /// <summary>Lets a later launch bring this instance's window back instead of doing nothing.</summary>
-    private void RegisterShowWindowSignal()
+    private static void HandOver(InstanceClient client)
     {
-        try
-        {
-            _showWindowSignal = new EventWaitHandle(initialState: false, EventResetMode.AutoReset, ShowWindowEventName);
-            _showWindowRegistration = ThreadPool.RegisterWaitForSingleObject(
-                _showWindowSignal,
-                (_, _) => Dispatcher.InvokeAsync(ShowMainWindow),
-                state: null,
-                Timeout.Infinite,
-                executeOnlyOnce: false);
-        }
-        catch (Exception exception) when (exception is UnauthorizedAccessException
-            or IOException
-            or WaitHandleCannotBeOpenedException)
-        {
-            // Single-instance enforcement still works; only the hand-over gesture is lost.
-        }
+        // This process still holds the foreground right the user's launch gave it; the running
+        // instance needs it to raise its own window.
+        NativeMethods.AllowSetForegroundWindow(client.RunningProcessId);
+        client.RequestShow();
     }
 
-    private static void SignalRunningInstance()
+    private bool TryReplace(InstanceClient client)
     {
-        try
+        var runningVersion = client.RunningVersion;
+        var runningProcessId = client.RunningProcessId;
+        var accepted = client.RequestExit();
+        client.Dispose();
+
+        if (accepted && InstanceCoordinator.WaitForProcessExit(runningProcessId, HandoverTimeout))
         {
-            if (EventWaitHandle.TryOpenExisting(ShowWindowEventName, out var signal))
+            _coordinator = InstanceCoordinator.ClaimAfterHandover(ProductVersion, PostShowMainWindow, PostExitApplication);
+            if (_coordinator is not null)
             {
-                using (signal)
-                {
-                    signal.Set();
-                }
+                return true;
             }
         }
-        catch (Exception exception) when (exception is UnauthorizedAccessException
-            or IOException
-            or WaitHandleCannotBeOpenedException)
-        {
-            // The running instance cannot be reached; exiting quietly is still the right outcome.
-        }
+
+        ShowMessage(Format("ReplaceFailed", runningVersion), MessageBoxImage.Warning);
+        return false;
     }
+
+    private bool ConfirmReplacement(Version? runningVersion) =>
+        System.Windows.MessageBox.Show(
+            Format("ReplaceRunningInstance", runningVersion),
+            "ThermoTray",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question) == MessageBoxResult.Yes;
+
+    private string Format(string key, Version? runningVersion) => string.Format(
+        CultureInfo.CurrentCulture,
+        Messages[key],
+        MainViewModel.FormatVersion(runningVersion),
+        MainViewModel.FormatVersion(ProductVersion));
+
+    private static void ShowMessage(string message, MessageBoxImage icon) =>
+        System.Windows.MessageBox.Show(message, "ThermoTray", MessageBoxButton.OK, icon);
+
+    private void PostShowMainWindow() => Dispatcher.InvokeAsync(ShowMainWindow);
+
+    private void PostExitApplication() => Dispatcher.InvokeAsync(ExitApplication);
 
     private void ShowMainWindow()
     {
@@ -136,6 +173,14 @@ public partial class App : System.Windows.Application
         MainWindow.Show();
         MainWindow.WindowState = WindowState.Normal;
         MainWindow.Activate();
+
+        // Activate() alone is a request the window manager may answer with a flashing taskbar button;
+        // the launching instance handed this process the right to take the foreground outright.
+        var handle = new WindowInteropHelper(MainWindow).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            NativeMethods.SetForegroundWindow(handle);
+        }
     }
 
     private void ExitApplication()
@@ -206,11 +251,7 @@ public partial class App : System.Windows.Application
         _viewModel?.Stop();
         _trayIcon?.Dispose();
 
-        _showWindowRegistration?.Unregister(waitObject: null);
-        _showWindowRegistration = null;
-        _showWindowSignal?.Dispose();
-        _showWindowSignal = null;
-        _singleInstanceMutex?.Dispose();
-        _singleInstanceMutex = null;
+        _coordinator?.Dispose();
+        _coordinator = null;
     }
 }
