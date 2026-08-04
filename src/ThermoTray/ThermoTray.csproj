@@ -10,6 +10,14 @@
     <ApplicationIcon>ThermoTray.ico</ApplicationIcon>
     <AssemblyName>ThermoTray</AssemblyName>
     <RootNamespace>ThermoTray</RootNamespace>
+    <!--
+      A tray app allocates almost nothing between samples. Workstation non-concurrent GC drops the
+      background GC thread and the heap it keeps reserved for collections this process never needs.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <!-- Precompiled code removes most of the JIT work, and its memory, from startup. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
     <!-- Also embedded as a resource so Window.Icon can load it at runtime. -->
