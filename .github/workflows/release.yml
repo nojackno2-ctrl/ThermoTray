@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Releasing without pushing a tag first: the release step creates the tag from the version below.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,16 +18,19 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # The tag names every artifact, so it has to agree with the version the build stamps in.
-      - name: Read and verify version
+      # Directory.Build.props is the only source of the version, and the tag names every artifact, so
+      # a tag that was pushed by hand has to agree with it.
+      - name: Resolve version and tag
         shell: pwsh
         run: |
           $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
           if (-not $version) { throw 'Version is not defined in Directory.Build.props' }
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) {
             throw "Tag $env:GITHUB_REF_NAME does not match Directory.Build.props version $version"
           }
           "AppVersion=$version" >> $env:GITHUB_ENV
+          "ReleaseTag=$tag" >> $env:GITHUB_ENV
 
       - run: dotnet restore ThermoTray.sln
       - run: dotnet build ThermoTray.sln --configuration Release --no-restore
@@ -45,13 +50,16 @@ jobs:
           $files = Get-ChildItem publish/win-x64 -Exclude *.pdb
           Compress-Archive -Path $files -DestinationPath "artifacts/ThermoTray-$env:AppVersion-win-x64-portable.zip" -Force
 
+      # Creates the tag at this commit when it does not exist yet, which is what makes a manual run a
+      # complete release path rather than something that has to be tagged first.
       - name: Publish the GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
+          gh release create $env:ReleaseTag `
             "artifacts/installer/ThermoTray-Setup-$env:AppVersion.exe" `
             "artifacts/ThermoTray-$env:AppVersion-win-x64-portable.zip" `
+            --target $env:GITHUB_SHA `
             --title "ThermoTray $env:AppVersion" `
             --generate-notes
