@@ -4,7 +4,7 @@
 #define AppName "ThermoTray"
 ; Overridden by CI with /DAppVersion=<version> read from Directory.Build.props.
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.3"
 #endif
 #define AppPublisher "ThermoTray"
 #define AppExeName "ThermoTray.exe"
@@ -25,6 +25,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#AppExeName}
+; Windows locks a running executable's image, so installing over a running ThermoTray fails. This
+; mutex is created by the application purely so Setup can see it and ask the user to close it first.
+AppMutex=Global\ThermoTray.Setup
+; Restart Manager cannot help here: it would have to terminate a requireAdministrator process from
+; an installer that deliberately runs at the lowest privilege level. AppMutex is the real gate.
+CloseApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
