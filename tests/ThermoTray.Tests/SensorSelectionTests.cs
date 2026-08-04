@@ -62,6 +62,37 @@ public sealed class UsableTemperatureTests
         Assert.False(HardwareSensorService.IsUsableTemperature(SensorType.Load, 50f, 1, 125));
 }
 
+public sealed class UsableUtilizationTests
+{
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(42.5f)]
+    [InlineData(100f)]
+    public void IsUsableUtilization_AcceptsValuesInsideTheRange(float percent) =>
+        Assert.True(HardwareSensorService.IsUsableUtilization(SensorType.Load, percent));
+
+    [Fact]
+    public void IsUsableUtilization_RejectsNull() =>
+        Assert.False(HardwareSensorService.IsUsableUtilization(SensorType.Load, null));
+
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    public void IsUsableUtilization_RejectsNonFiniteValues(float percent) =>
+        Assert.False(HardwareSensorService.IsUsableUtilization(SensorType.Load, percent));
+
+    [Theory]
+    [InlineData(-0.1f)]
+    [InlineData(100.1f)]
+    public void IsUsableUtilization_RejectsValuesOutsideTheRange(float percent) =>
+        Assert.False(HardwareSensorService.IsUsableUtilization(SensorType.Load, percent));
+
+    [Fact]
+    public void IsUsableUtilization_RejectsNonLoadSensors() =>
+        Assert.False(HardwareSensorService.IsUsableUtilization(SensorType.Temperature, 50f));
+}
+
 public sealed class GpuSensorRankTests
 {
     [Fact]

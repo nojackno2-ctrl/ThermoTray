@@ -12,6 +12,8 @@ public sealed class HardwareSensorService : IDisposable
 
     private static readonly string[] CpuPreferredNames = ["Tctl/Tdie", "Package", "CPU Package", "Core Average"];
     private static readonly string[] GpuPreferredNames = ["GPU Core", "Core", "Hot Spot"];
+    private static readonly string[] CpuUsagePreferredNames = ["CPU Total", "Total"];
+    private static readonly string[] GpuUsagePreferredNames = ["GPU Core", "GPU Total", "Core"];
     private static readonly UpdateVisitor HardwareUpdater = new();
 
     private readonly Computer _computer = new()
@@ -29,6 +31,8 @@ public sealed class HardwareSensorService : IDisposable
     private IHardware[] _hardware = [];
     private CpuCandidate[] _cpuCandidates = [];
     private GpuCandidate[] _gpuCandidates = [];
+    private CpuCandidate[] _cpuUsageCandidates = [];
+    private GpuUsageCandidate[] _gpuUsageCandidates = [];
 
     // Written by LibreHardwareMonitor's change events, which need not run on the sampling thread.
     private volatile bool _topologyChanged;
@@ -40,21 +44,25 @@ public sealed class HardwareSensorService : IDisposable
         _onSensorChanged = _ => _topologyChanged = true;
     }
 
-    public TemperatureSnapshot Read()
+    public HardwareSnapshot Read()
     {
         UpdateHardware();
 
-        return new TemperatureSnapshot(SelectCpuReading(), SelectGpuReading());
+        return new HardwareSnapshot(
+            SelectCpuReading(),
+            SelectGpuReading(),
+            SelectCpuUsage(),
+            SelectGpuUsage());
     }
 
-    public IReadOnlyList<RawTemperatureSensor> ReadRawTemperatureSensors()
+    public IReadOnlyList<RawHardwareSensor> ReadRawSensors()
     {
         UpdateHardware();
 
-        var sensors = new List<RawTemperatureSensor>();
+        var sensors = new List<RawHardwareSensor>();
         foreach (var hardware in _hardware)
         {
-            AppendRawTemperatureSensors(hardware, sensors);
+            AppendRawSensors(hardware, sensors);
         }
 
         return sensors;
@@ -104,16 +112,25 @@ public sealed class HardwareSensorService : IDisposable
 
         var cpuCandidates = new List<CpuCandidate>();
         var gpuCandidates = new List<GpuCandidate>();
+        var cpuUsageCandidates = new List<CpuCandidate>();
+        var gpuUsageCandidates = new List<GpuUsageCandidate>();
         foreach (var root in roots)
         {
-            CollectCandidates(root, cpuCandidates, gpuCandidates);
+            CollectCandidates(root, cpuCandidates, gpuCandidates, cpuUsageCandidates, gpuUsageCandidates);
         }
 
         _cpuCandidates = cpuCandidates.ToArray();
         _gpuCandidates = gpuCandidates.ToArray();
+        _cpuUsageCandidates = cpuUsageCandidates.ToArray();
+        _gpuUsageCandidates = gpuUsageCandidates.ToArray();
     }
 
-    private void CollectCandidates(IHardware hardware, List<CpuCandidate> cpuCandidates, List<GpuCandidate> gpuCandidates)
+    private void CollectCandidates(
+        IHardware hardware,
+        List<CpuCandidate> cpuCandidates,
+        List<GpuCandidate> gpuCandidates,
+        List<CpuCandidate> cpuUsageCandidates,
+        List<GpuUsageCandidate> gpuUsageCandidates)
     {
         // Subscribing twice would raise the flag twice; removing an absent handler is a no-op, so this
         // stays correct across the repeated scans that a hardware change triggers.
@@ -132,31 +149,44 @@ public sealed class HardwareSensorService : IDisposable
         {
             DisableValueHistory(sensor);
 
-            if (sensor.SensorType != SensorType.Temperature)
+            if (sensor.SensorType == SensorType.Temperature)
             {
-                continue;
+                if (isCpu)
+                {
+                    cpuCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuPreferredNames)));
+                }
+                else if (isGpu)
+                {
+                    // Discovery order is the last tiebreaker, so the position in this list is the sequence.
+                    var sequence = gpuCandidates.Count;
+                    gpuCandidates.Add(new GpuCandidate(
+                        hardware,
+                        sensor,
+                        new GpuSensorRank(GetPreferredRank(sensor.Name, GpuPreferredNames), hardwarePriority, sequence),
+                        // The fallback ignores the sensor name so an unrecognised GPU still reports something.
+                        new GpuSensorRank(GpuSensorRank.AnyName, hardwarePriority, sequence)));
+                }
             }
-
-            if (isCpu)
+            else if (sensor.SensorType == SensorType.Load)
             {
-                cpuCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuPreferredNames)));
-            }
-            else if (isGpu)
-            {
-                // Discovery order is the last tiebreaker, so the position in this list is the sequence.
-                var sequence = gpuCandidates.Count;
-                gpuCandidates.Add(new GpuCandidate(
-                    hardware,
-                    sensor,
-                    new GpuSensorRank(GetPreferredRank(sensor.Name, GpuPreferredNames), hardwarePriority, sequence),
-                    // The fallback ignores the sensor name so an unrecognised GPU still reports something.
-                    new GpuSensorRank(GpuSensorRank.AnyName, hardwarePriority, sequence)));
+                if (isCpu)
+                {
+                    cpuUsageCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuUsagePreferredNames)));
+                }
+                else if (isGpu)
+                {
+                    var sequence = gpuUsageCandidates.Count;
+                    gpuUsageCandidates.Add(new GpuUsageCandidate(
+                        hardware,
+                        sensor,
+                        new GpuSensorRank(GetPreferredRank(sensor.Name, GpuUsagePreferredNames), hardwarePriority, sequence)));
+                }
             }
         }
 
         foreach (var subHardware in hardware.SubHardware)
         {
-            CollectCandidates(subHardware, cpuCandidates, gpuCandidates);
+            CollectCandidates(subHardware, cpuCandidates, gpuCandidates, cpuUsageCandidates, gpuUsageCandidates);
         }
     }
 
@@ -194,7 +224,7 @@ public sealed class HardwareSensorService : IDisposable
                 preferredRank = candidate.NameRank;
             }
 
-            if (!fallback.IsValid || celsius > fallback.Celsius)
+            if (!fallback.IsValid || celsius > fallback.Value)
             {
                 fallback = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
             }
@@ -233,11 +263,66 @@ public sealed class HardwareSensorService : IDisposable
         return ToReading(preferred.IsValid ? preferred : fallback);
     }
 
+    /// <summary>
+    /// Unlike the temperature paths there is no name-agnostic fallback: a load sensor whose name is
+    /// not recognised may describe a single core or an engine, and showing that as "CPU usage" would
+    /// be wrong in a way an unavailable value is not.
+    /// </summary>
+    private UtilizationReading SelectCpuUsage()
+    {
+        SensorCandidate preferred = default;
+        var preferredRank = int.MaxValue;
+
+        foreach (var candidate in _cpuUsageCandidates)
+        {
+            if (!TryGetUsage(candidate.Sensor, out var percent))
+            {
+                continue;
+            }
+
+            if (candidate.NameRank < preferredRank)
+            {
+                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, percent);
+                preferredRank = candidate.NameRank;
+            }
+        }
+
+        return ToUtilizationReading(preferred);
+    }
+
+    private UtilizationReading SelectGpuUsage()
+    {
+        SensorCandidate preferred = default;
+        var preferredRank = GpuSensorRank.None;
+
+        foreach (var candidate in _gpuUsageCandidates)
+        {
+            if (!TryGetUsage(candidate.Sensor, out var percent))
+            {
+                continue;
+            }
+
+            if (candidate.PreferredRank.IsBetterThan(preferredRank))
+            {
+                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, percent);
+                preferredRank = candidate.PreferredRank;
+            }
+        }
+
+        return ToUtilizationReading(preferred);
+    }
+
     private static bool TryGetTemperature(ISensor sensor, float minimumCelsius, float maximumCelsius, out float celsius)
     {
         var value = sensor.Value;
         celsius = value.GetValueOrDefault();
         return IsUsableTemperature(sensor.SensorType, value, minimumCelsius, maximumCelsius);
+    }
+
+    private static bool TryGetUsage(ISensor sensor, out float percent)
+    {
+        percent = sensor.Value.GetValueOrDefault();
+        return IsUsableUtilization(sensor.SensorType, sensor.Value);
     }
 
     /// <summary>
@@ -250,6 +335,17 @@ public sealed class HardwareSensorService : IDisposable
         && float.IsFinite(celsius)
         && celsius >= minimumCelsius
         && celsius <= maximumCelsius;
+
+    /// <summary>
+    /// A zero load is valid, because an idle CPU or GPU can legitimately report 0 percent. Only
+    /// null, non-finite, out-of-range, and non-load sensor values are rejected.
+    /// </summary>
+    internal static bool IsUsableUtilization(SensorType sensorType, float? value) =>
+        sensorType == SensorType.Load
+        && value is float percent
+        && float.IsFinite(percent)
+        && percent >= 0
+        && percent <= 100;
 
     internal static int GetPreferredRank(string sensorName, IReadOnlyList<string> preferredNames)
     {
@@ -271,24 +367,40 @@ public sealed class HardwareSensorService : IDisposable
             return TemperatureReading.Unavailable;
         }
 
+        return new TemperatureReading(decimal.Round((decimal)candidate.Value, 1), GetSourceName(candidate));
+    }
+
+    private UtilizationReading ToUtilizationReading(SensorCandidate candidate)
+    {
+        if (!candidate.IsValid)
+        {
+            return UtilizationReading.Unavailable;
+        }
+
+        return new UtilizationReading(decimal.Round((decimal)candidate.Value, 1), GetSourceName(candidate));
+    }
+
+    private string GetSourceName(SensorCandidate candidate)
+    {
         if (!_sourceNames.TryGetValue(candidate.Sensor!, out var source))
         {
             source = $"{candidate.Hardware!.Name} • {candidate.Sensor!.Name}";
             _sourceNames.Add(candidate.Sensor, source);
         }
 
-        return new TemperatureReading(decimal.Round((decimal)candidate.Celsius, 1), source);
+        return source;
     }
 
-    private static void AppendRawTemperatureSensors(IHardware hardware, ICollection<RawTemperatureSensor> sensors)
+    private static void AppendRawSensors(IHardware hardware, ICollection<RawHardwareSensor> sensors)
     {
         foreach (var sensor in hardware.Sensors)
         {
-            if (sensor.SensorType == SensorType.Temperature)
+            if (sensor.SensorType is SensorType.Temperature or SensorType.Load)
             {
-                sensors.Add(new RawTemperatureSensor(
+                sensors.Add(new RawHardwareSensor(
                     hardware.HardwareType.ToString(),
                     hardware.Name,
+                    sensor.SensorType.ToString(),
                     sensor.Name,
                     sensor.Value));
             }
@@ -296,7 +408,7 @@ public sealed class HardwareSensorService : IDisposable
 
         foreach (var subHardware in hardware.SubHardware)
         {
-            AppendRawTemperatureSensors(subHardware, sensors);
+            AppendRawSensors(subHardware, sensors);
         }
     }
 
@@ -318,6 +430,8 @@ public sealed class HardwareSensorService : IDisposable
         _hardware = [];
         _cpuCandidates = [];
         _gpuCandidates = [];
+        _cpuUsageCandidates = [];
+        _gpuUsageCandidates = [];
         _sourceNames.Clear();
         _opened = false;
     }
@@ -333,7 +447,7 @@ public sealed class HardwareSensorService : IDisposable
         }
     }
 
-    /// <summary>A CPU temperature sensor with its sensor-name preference resolved at discovery time.</summary>
+    /// <summary>A CPU sensor with its sensor-name preference resolved at discovery time.</summary>
     private readonly record struct CpuCandidate(IHardware Hardware, ISensor Sensor, int NameRank);
 
     /// <summary>A GPU temperature sensor with both of its rankings resolved at discovery time.</summary>
@@ -343,7 +457,14 @@ public sealed class HardwareSensorService : IDisposable
         GpuSensorRank PreferredRank,
         GpuSensorRank FallbackRank);
 
-    private readonly record struct SensorCandidate(IHardware? Hardware, ISensor? Sensor, float Celsius)
+    /// <summary>A GPU load sensor with its ranking resolved at discovery time.</summary>
+    private readonly record struct GpuUsageCandidate(
+        IHardware Hardware,
+        ISensor Sensor,
+        GpuSensorRank PreferredRank);
+
+    /// <summary>A selected sensor together with the value (°C or percent) it reported this sample.</summary>
+    private readonly record struct SensorCandidate(IHardware? Hardware, ISensor? Sensor, float Value)
     {
         public bool IsValid => Sensor is not null;
     }
@@ -367,10 +488,15 @@ public sealed class HardwareSensorService : IDisposable
     }
 }
 
-public sealed record RawTemperatureSensor(string HardwareType, string HardwareName, string SensorName, float? Celsius);
+public sealed record RawHardwareSensor(
+    string HardwareType,
+    string HardwareName,
+    string SensorType,
+    string SensorName,
+    float? Value);
 
 /// <summary>
-/// Orders GPU temperature sensors by sensor-name preference first, then discrete before integrated,
+/// Orders GPU sensors by sensor-name preference first, then discrete before integrated,
 /// then discovery order. Lower is better in every component.
 /// </summary>
 internal readonly record struct GpuSensorRank(int NameRank, int HardwarePriority, int Sequence)

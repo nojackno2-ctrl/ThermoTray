@@ -9,16 +9,19 @@ namespace ThermoTray;
 public sealed class TrayIconService : IDisposable
 {
     private const int IconSize = 64;
-    private const float DigitsFontSize = 36f;
-    private const float PlaceholderFontSize = 30f;
-    private const float MinimumFontSize = 22f;
+    private const float StartingFontSize = 52f;
+    private const float MinimumFontSize = 34f;
+    private const float UsageLineTop = -2f;
+    private const float TemperatureLineTop = 35f;
+    private const float LineHeight = 31f;
     private const float FontSizeStep = 2f;
-    private static readonly Color IconBackground = Color.FromArgb(32, 36, 44);
-    private static readonly RectangleF IconBounds = new(0, 0, IconSize, IconSize);
+    private static readonly RectangleF UsageLineBounds = new(0, UsageLineTop, IconSize, LineHeight);
+    private static readonly RectangleF TemperatureLineBounds = new(0, TemperatureLineTop, IconSize, LineHeight);
 
     // Every drawing object below outlives the icon it is drawn into. Each one owns a GDI+ handle, and
-    // an icon is redrawn whenever its whole degree changes, so creating them per redraw would churn
+    // an icon is redrawn whenever its displayed digits change, so creating them per redraw would churn
     // handles all day for a fixed and very small set of objects. Only the UI thread touches them.
+    private static readonly SolidBrush UsageBrush = new(Color.FromArgb(245, 247, 250));
     private static readonly SolidBrush CpuBrush = new(Color.FromArgb(85, 214, 190));
     private static readonly SolidBrush GpuBrush = new(Color.FromArgb(116, 176, 255));
 
@@ -31,9 +34,9 @@ public sealed class TrayIconService : IDisposable
     private static readonly Dictionary<float, Font> FontsBySize = new();
 
     /// <summary>
-    /// The fitted font for each string ThermoTray has already drawn. Its keys are bounded by the
-    /// placeholder plus the temperatures the sensor ranges allow, so it settles within the first
-    /// minutes and then removes the text measuring from the redraw path entirely.
+    /// The fitted font for each digit string ThermoTray has already drawn. Its keys are bounded by the
+    /// placeholder plus the values the sensor ranges allow, so it settles within the first minutes and
+    /// then removes the text measuring from the redraw path entirely.
     /// </summary>
     private static readonly Dictionary<string, Font> FittedFonts = new(StringComparer.Ordinal);
 
@@ -42,8 +45,8 @@ public sealed class TrayIconService : IDisposable
     private readonly Action _exitApplication;
     private readonly Forms.NotifyIcon _cpuNotifyIcon;
     private readonly Forms.NotifyIcon _gpuNotifyIcon;
-    private string? _cpuIconDigits;
-    private string? _gpuIconDigits;
+    private string? _cpuIconKey;
+    private string? _gpuIconKey;
     private bool _disposed;
 
     public TrayIconService(MainViewModel viewModel, Action showMainWindow, Action exitApplication)
@@ -85,13 +88,18 @@ public sealed class TrayIconService : IDisposable
         // A null or empty name is the conventional "everything changed" signal.
         var everythingChanged = string.IsNullOrEmpty(e.PropertyName);
 
-        if (everythingChanged || e.PropertyName is nameof(MainViewModel.CpuTemperature) or nameof(MainViewModel.CpuTrayDigits))
+        if (everythingChanged || e.PropertyName is nameof(MainViewModel.CpuTemperature)
+            or nameof(MainViewModel.CpuTrayDigits)
+            or nameof(MainViewModel.CpuUsage)
+            or nameof(MainViewModel.CpuUsageTrayDigits))
         {
             UpdateCpuIcon();
         }
 
         if (everythingChanged || e.PropertyName is nameof(MainViewModel.GpuTemperature)
             or nameof(MainViewModel.GpuTrayDigits)
+            or nameof(MainViewModel.GpuUsage)
+            or nameof(MainViewModel.GpuUsageTrayDigits)
             or nameof(MainViewModel.IsGpuPresent))
         {
             UpdateGpuIcon();
@@ -118,14 +126,16 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        var digits = _viewModel.CpuTrayDigits;
-        if (!string.Equals(digits, _cpuIconDigits, StringComparison.Ordinal))
+        var usageDigits = _viewModel.CpuUsageTrayDigits;
+        var temperatureDigits = _viewModel.CpuTrayDigits;
+        var iconKey = $"{usageDigits}|{temperatureDigits}";
+        if (!string.Equals(iconKey, _cpuIconKey, StringComparison.Ordinal))
         {
-            ReplaceIcon(_cpuNotifyIcon, digits, CpuBrush);
-            _cpuIconDigits = digits;
+            ReplaceIcon(_cpuNotifyIcon, usageDigits, temperatureDigits, CpuBrush);
+            _cpuIconKey = iconKey;
         }
 
-        _cpuNotifyIcon.Text = $"CPU: {_viewModel.CpuTemperature}";
+        _cpuNotifyIcon.Text = BuildTooltip("CpuUsage", _viewModel.CpuUsage, "CpuTemperature", _viewModel.CpuTemperature);
     }
 
     private void UpdateGpuIcon()
@@ -141,30 +151,38 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        var digits = _viewModel.GpuTrayDigits;
-        if (!string.Equals(digits, _gpuIconDigits, StringComparison.Ordinal))
+        var usageDigits = _viewModel.GpuUsageTrayDigits;
+        var temperatureDigits = _viewModel.GpuTrayDigits;
+        var iconKey = $"{usageDigits}|{temperatureDigits}";
+        if (!string.Equals(iconKey, _gpuIconKey, StringComparison.Ordinal))
         {
-            ReplaceIcon(_gpuNotifyIcon, digits, GpuBrush);
-            _gpuIconDigits = digits;
+            ReplaceIcon(_gpuNotifyIcon, usageDigits, temperatureDigits, GpuBrush);
+            _gpuIconKey = iconKey;
         }
 
-        _gpuNotifyIcon.Text = $"GPU: {_viewModel.GpuTemperature}";
+        _gpuNotifyIcon.Text = BuildTooltip("GpuUsage", _viewModel.GpuUsage, "GpuTemperature", _viewModel.GpuTemperature);
     }
 
-    private static void ReplaceIcon(Forms.NotifyIcon notifyIcon, string temperature, Brush foreground)
+    private string BuildTooltip(string usageLabel, string usage, string temperatureLabel, string temperature) =>
+        $"{_viewModel.T[usageLabel]}: {usage} | {_viewModel.T[temperatureLabel]}: {temperature}";
+
+    private static void ReplaceIcon(Forms.NotifyIcon notifyIcon, string usageDigits, string temperatureDigits, Brush temperatureBrush)
     {
         var oldIcon = notifyIcon.Icon;
-        notifyIcon.Icon = CreateTemperatureIcon(temperature, foreground);
+        notifyIcon.Icon = CreateHardwareIcon(usageDigits, temperatureDigits, temperatureBrush);
         oldIcon?.Dispose();
     }
 
-    private static Icon CreateTemperatureIcon(string temperature, Brush foreground)
+    /// <summary>Draws large unitless digits, utilization above temperature, so both stay legible in the tray.</summary>
+    private static Icon CreateHardwareIcon(string usageDigits, string temperatureDigits, Brush temperatureBrush)
     {
         using var bitmap = new Bitmap(IconSize, IconSize);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        graphics.Clear(IconBackground);
-        graphics.DrawString(temperature, GetFittingFont(graphics, temperature), foreground, IconBounds, CenteredFormat);
+        graphics.Clear(Color.Transparent);
+
+        graphics.DrawString(usageDigits, GetFittingFont(graphics, usageDigits), UsageBrush, UsageLineBounds, CenteredFormat);
+        graphics.DrawString(temperatureDigits, GetFittingFont(graphics, temperatureDigits), temperatureBrush, TemperatureLineBounds, CenteredFormat);
 
         var iconHandle = bitmap.GetHicon();
         using var temporaryIcon = Icon.FromHandle(iconHandle);
@@ -173,27 +191,25 @@ public sealed class TrayIconService : IDisposable
         return icon;
     }
 
-    private static Font GetFittingFont(Graphics graphics, string temperature)
+    private static Font GetFittingFont(Graphics graphics, string digits)
     {
-        if (FittedFonts.TryGetValue(temperature, out var fitted))
+        if (FittedFonts.TryGetValue(digits, out var fitted))
         {
             return fitted;
         }
 
-        fitted = MeasureFittingFont(graphics, temperature);
-        FittedFonts.Add(temperature, fitted);
+        fitted = MeasureFittingFont(graphics, digits);
+        FittedFonts.Add(digits, fitted);
         return fitted;
     }
 
-    /// <summary>Picks the largest font that keeps the text inside the icon, so 100 °C is not clipped.</summary>
-    private static Font MeasureFittingFont(Graphics graphics, string temperature)
+    /// <summary>Picks the largest font that keeps one tray line inside the icon, so 100 is not clipped.</summary>
+    private static Font MeasureFittingFont(Graphics graphics, string digits)
     {
-        var startingSize = temperature == TemperatureFormatter.TrayPlaceholder ? PlaceholderFontSize : DigitsFontSize;
-
-        for (var size = startingSize; size > MinimumFontSize; size -= FontSizeStep)
+        for (var size = StartingFontSize; size >= MinimumFontSize; size -= FontSizeStep)
         {
             var font = GetFont(size);
-            if (graphics.MeasureString(temperature, font, new SizeF(IconSize * 4f, IconSize * 4f), CenteredFormat).Width <= IconSize)
+            if (graphics.MeasureString(digits, font).Width <= IconSize - 4)
             {
                 return font;
             }
