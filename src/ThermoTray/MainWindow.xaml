@@ -20,7 +20,12 @@
     </Grid.RowDefinitions>
 
     <StackPanel>
-      <TextBlock Text="ThermoTray" FontSize="26" FontWeight="SemiBold" />
+      <!-- The version sits on the title's baseline so it reads as part of the name rather than as data. -->
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="ThermoTray" FontSize="26" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding Version}" Foreground="{StaticResource MutedBrush}" FontSize="14"
+                   VerticalAlignment="Bottom" Margin="9,0,0,5" />
+      </StackPanel>
       <TextBlock Text="{Binding T[Subtitle]}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" />
     </StackPanel>
 

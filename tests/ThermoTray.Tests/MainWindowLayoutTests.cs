@@ -52,6 +52,26 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         _fixture.Invoke(window => Assert.Equal(SizeToContent.Height, window.SizeToContent));
 
     /// <summary>
+    /// The version has to be on screen rather than merely bound. It sits beside the title in a
+    /// horizontal row, which is a layout that can push it past the right edge, and a run of text that
+    /// renders nothing still reports a position like any other.
+    /// </summary>
+    [Fact]
+    public void TheHeaderShowsTheProductVersion() =>
+        _fixture.Invoke(window =>
+        {
+            var content = (FrameworkElement)window.Content;
+            var title = (StackPanel)((StackPanel)((Grid)content).Children[0]).Children[0];
+            var version = (TextBlock)title.Children[1];
+
+            Assert.Equal(MainViewModel.FormatVersion(typeof(MainViewModel).Assembly.GetName().Version), version.Text);
+            Assert.True(version.ActualWidth > 0, "the version renders nothing");
+
+            var edge = version.TransformToAncestor(content).TransformBounds(new Rect(version.RenderSize)).Right;
+            Assert.True(edge <= content.ActualWidth + 0.5, $"the version reaches {edge} in contents {content.ActualWidth} wide");
+        });
+
+    /// <summary>
     /// The last child is the device name, the longest and least predictable text on the card. Where it
     /// ends up is measured against the card rather than eyeballed, because a clipped card still reports
     /// a sensible size; only the text's own position gives it away.
