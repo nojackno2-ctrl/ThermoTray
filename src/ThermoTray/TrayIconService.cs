@@ -9,17 +9,36 @@ namespace ThermoTray;
 public sealed class TrayIconService : IDisposable
 {
     private const int IconSize = 64;
-    private const float UsageFontSize = 52f;
-    private const float TemperatureFontSize = 52f;
-    private const float MinimumUsageFontSize = 34f;
-    private const float MinimumTemperatureFontSize = 34f;
+    private const float StartingFontSize = 52f;
+    private const float MinimumFontSize = 34f;
     private const float UsageLineTop = -2f;
     private const float TemperatureLineTop = 35f;
     private const float LineHeight = 31f;
     private const float FontSizeStep = 2f;
-    private static readonly Color UsageForeground = Color.FromArgb(245, 247, 250);
-    private static readonly Color CpuForeground = Color.FromArgb(85, 214, 190);
-    private static readonly Color GpuForeground = Color.FromArgb(116, 176, 255);
+    private static readonly RectangleF UsageLineBounds = new(0, UsageLineTop, IconSize, LineHeight);
+    private static readonly RectangleF TemperatureLineBounds = new(0, TemperatureLineTop, IconSize, LineHeight);
+
+    // Every drawing object below outlives the icon it is drawn into. Each one owns a GDI+ handle, and
+    // an icon is redrawn whenever its displayed digits change, so creating them per redraw would churn
+    // handles all day for a fixed and very small set of objects. Only the UI thread touches them.
+    private static readonly SolidBrush UsageBrush = new(Color.FromArgb(245, 247, 250));
+    private static readonly SolidBrush CpuBrush = new(Color.FromArgb(85, 214, 190));
+    private static readonly SolidBrush GpuBrush = new(Color.FromArgb(116, 176, 255));
+
+    private static readonly StringFormat CenteredFormat = new()
+    {
+        Alignment = StringAlignment.Center,
+        LineAlignment = StringAlignment.Center,
+    };
+
+    private static readonly Dictionary<float, Font> FontsBySize = new();
+
+    /// <summary>
+    /// The fitted font for each digit string ThermoTray has already drawn. Its keys are bounded by the
+    /// placeholder plus the values the sensor ranges allow, so it settles within the first minutes and
+    /// then removes the text measuring from the redraw path entirely.
+    /// </summary>
+    private static readonly Dictionary<string, Font> FittedFonts = new(StringComparer.Ordinal);
 
     private readonly MainViewModel _viewModel;
     private readonly Action _showMainWindow;
@@ -112,7 +131,7 @@ public sealed class TrayIconService : IDisposable
         var iconKey = $"{usageDigits}|{temperatureDigits}";
         if (!string.Equals(iconKey, _cpuIconKey, StringComparison.Ordinal))
         {
-            ReplaceIcon(_cpuNotifyIcon, usageDigits, temperatureDigits, CpuForeground);
+            ReplaceIcon(_cpuNotifyIcon, usageDigits, temperatureDigits, CpuBrush);
             _cpuIconKey = iconKey;
         }
 
@@ -137,7 +156,7 @@ public sealed class TrayIconService : IDisposable
         var iconKey = $"{usageDigits}|{temperatureDigits}";
         if (!string.Equals(iconKey, _gpuIconKey, StringComparison.Ordinal))
         {
-            ReplaceIcon(_gpuNotifyIcon, usageDigits, temperatureDigits, GpuForeground);
+            ReplaceIcon(_gpuNotifyIcon, usageDigits, temperatureDigits, GpuBrush);
             _gpuIconKey = iconKey;
         }
 
@@ -147,44 +166,23 @@ public sealed class TrayIconService : IDisposable
     private string BuildTooltip(string usageLabel, string usage, string temperatureLabel, string temperature) =>
         $"{_viewModel.T[usageLabel]}: {usage} | {_viewModel.T[temperatureLabel]}: {temperature}";
 
-    private static void ReplaceIcon(Forms.NotifyIcon notifyIcon, string usageDigits, string temperatureDigits, Color color)
+    private static void ReplaceIcon(Forms.NotifyIcon notifyIcon, string usageDigits, string temperatureDigits, Brush temperatureBrush)
     {
         var oldIcon = notifyIcon.Icon;
-        notifyIcon.Icon = CreateHardwareIcon(usageDigits, temperatureDigits, color);
+        notifyIcon.Icon = CreateHardwareIcon(usageDigits, temperatureDigits, temperatureBrush);
         oldIcon?.Dispose();
     }
 
-    private static Icon CreateHardwareIcon(string usageDigits, string temperatureDigits, Color temperatureColor)
+    /// <summary>Draws large unitless digits, utilization above temperature, so both stay legible in the tray.</summary>
+    private static Icon CreateHardwareIcon(string usageDigits, string temperatureDigits, Brush temperatureBrush)
     {
         using var bitmap = new Bitmap(IconSize, IconSize);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.Clear(Color.Transparent);
 
-        using var format = new StringFormat
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center,
-        };
-        using var usageBrush = new SolidBrush(UsageForeground);
-        using var temperatureBrush = new SolidBrush(temperatureColor);
-
-        DrawValueLine(
-            graphics,
-            usageDigits,
-            usageBrush,
-            new RectangleF(0, UsageLineTop, IconSize, LineHeight),
-            UsageFontSize,
-            MinimumUsageFontSize,
-            format);
-        DrawValueLine(
-            graphics,
-            temperatureDigits,
-            temperatureBrush,
-            new RectangleF(0, TemperatureLineTop, IconSize, LineHeight),
-            TemperatureFontSize,
-            MinimumTemperatureFontSize,
-            format);
+        graphics.DrawString(usageDigits, GetFittingFont(graphics, usageDigits), UsageBrush, UsageLineBounds, CenteredFormat);
+        graphics.DrawString(temperatureDigits, GetFittingFont(graphics, temperatureDigits), temperatureBrush, TemperatureLineBounds, CenteredFormat);
 
         var iconHandle = bitmap.GetHicon();
         using var temporaryIcon = Icon.FromHandle(iconHandle);
@@ -193,39 +191,42 @@ public sealed class TrayIconService : IDisposable
         return icon;
     }
 
-    /// <summary>Draws large unitless digits so the values remain legible in the tray.</summary>
-    private static void DrawValueLine(
-        Graphics graphics,
-        string digits,
-        Brush brush,
-        RectangleF bounds,
-        float startingSize,
-        float minimumSize,
-        StringFormat format)
+    private static Font GetFittingFont(Graphics graphics, string digits)
     {
-        using var font = CreateFittingFont(graphics, digits, startingSize, minimumSize);
-        graphics.DrawString(digits, font, brush, bounds, format);
+        if (FittedFonts.TryGetValue(digits, out var fitted))
+        {
+            return fitted;
+        }
+
+        fitted = MeasureFittingFont(graphics, digits);
+        FittedFonts.Add(digits, fitted);
+        return fitted;
     }
 
-    /// <summary>Picks the largest font that keeps one tray line inside the icon.</summary>
-    private static Font CreateFittingFont(
-        Graphics graphics,
-        string digits,
-        float startingSize,
-        float minimumSize)
+    /// <summary>Picks the largest font that keeps one tray line inside the icon, so 100 is not clipped.</summary>
+    private static Font MeasureFittingFont(Graphics graphics, string digits)
     {
-        for (var size = startingSize; size >= minimumSize; size -= FontSizeStep)
+        for (var size = StartingFontSize; size >= MinimumFontSize; size -= FontSizeStep)
         {
-            var font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel);
+            var font = GetFont(size);
             if (graphics.MeasureString(digits, font).Width <= IconSize - 4)
             {
                 return font;
             }
-
-            font.Dispose();
         }
 
-        return new Font("Segoe UI", minimumSize, FontStyle.Bold, GraphicsUnit.Pixel);
+        return GetFont(MinimumFontSize);
+    }
+
+    private static Font GetFont(float size)
+    {
+        if (!FontsBySize.TryGetValue(size, out var font))
+        {
+            font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel);
+            FontsBySize.Add(size, font);
+        }
+
+        return font;
     }
 
     public void Dispose()

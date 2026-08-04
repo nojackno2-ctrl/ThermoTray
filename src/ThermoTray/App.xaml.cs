@@ -41,13 +41,18 @@ public partial class App : System.Windows.Application
         // The tray owns the lifetime, so hiding or closing the window must not end the process.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        _viewModel = new MainViewModel(new HardwareSensorService(), new SettingsService(), new StartupService());
-        _trayIcon = new TrayIconService(_viewModel, ShowMainWindow, ExitApplication);
+        var viewModel = new MainViewModel(new HardwareSensorService(), new SettingsService(), new StartupService());
+        _viewModel = viewModel;
+        _trayIcon = new TrayIconService(viewModel, ShowMainWindow, ExitApplication);
 
-        var window = new MainWindow { DataContext = _viewModel };
+        var window = new MainWindow { DataContext = viewModel };
         window.Closed += (_, _) => ExitApplication();
+
+        // Hiding to the tray is the app's normal state, and it is the sampling rate's only input, so
+        // the window reports every visibility change rather than only the ones it initiates.
+        window.IsVisibleChanged += (_, _) => viewModel.SetWindowVisible(window.IsVisible);
         MainWindow = window;
-        _viewModel.Start();
+        viewModel.Start();
 
         // Starting minimized never shows the window, which avoids a visible flash at logon.
         if (!e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase))
