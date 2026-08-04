@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Create **ThermoTray**, a Visual Studio-buildable C# Windows application that displays real CPU/GPU temperatures, supports Traditional Chinese and English, lives in the system tray, optionally starts with Windows, and can be packaged with an installer.
+Create **ThermoTray**, a Visual Studio-buildable C# Windows application that displays real CPU/GPU temperatures and utilization, supports Traditional Chinese and English, lives in the system tray, optionally starts with Windows, and can be packaged with an installer.
 
 ## Starting state
 
@@ -91,4 +91,57 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - Unelevated smoke test used a temporary `asInvoker` copy built into the scratchpad, so no UAC prompt was raised and the shipped manifest was untouched. Results: first instance stable; second launch exited 0 with only one process remaining; `--minimized` produced no window (`MainWindowHandle=0`) and a later launch raised it (`handle=3547902`, title `ThermoTray`); closing with `HideWhenClosed=true` hid the window and kept the process alive; a further launch raised it again; with `HideWhenClosed=false` the graceful close path exited in 92 ms with exit code 0, well inside the 5 s shutdown wait. Private memory 92.3 MB, 792 handles, 31 threads after ~10 s. The user's real `settings.json` was backed up and restored (it did not exist beforehand and was removed again).
 - A `PrintWindow` capture confirmed the new layout: title-bar icon present, two equal cards, a live `44 °C` reading from the discrete NVIDIA GPU, checkboxes and language selector all laid out. The first capture appeared cropped only because the capturing script was DPI-unaware on a 125 %-scaled display; re-running it DPI-aware produced the correct 625x550 image.
 - Post-review artifacts: publish is 9 files totalling 166,313,044 bytes; installer is 50,733,389 bytes with SHA-256 `0F4FF81004E76BA9FEAD762F1FE82E568296337B1D548877507F47F758E3B09B`. This supersedes every earlier hash in this document.
-- Still open, and deliberately not changed: the `ComboBox` and `CheckBox` use the default light Windows theme inside the dark window, which needs a full `ControlTemplate` to fix properly; and the repository still has no initial commit.
+- The old light-theme `ComboBox`/`CheckBox` issue was resolved on 2026-08-03 with application-level dark control templates. The repository is no longer in the initial uncommitted state: `main` is at tagged `v1.0.1` and tracks `origin/main`; no new commit or push was made during the 2026-08-03 work.
+
+## 2026-08-03 recommendation implementation
+
+- Implemented dark WPF `CheckBox`, `ComboBox`, `ComboBoxItem`, and dropdown button templates in `App.xaml`, including hover, pressed, selected, disabled, keyboard-focus, and checked states.
+- Expanded the Traditional Chinese and English README sections with post-install validation steps, PawnIO/UAC troubleshooting, tray-order caveats, and a clear distinction between unavailable readings and `0 °C`.
+- Updated local publish instructions to restore explicitly for `win-x64` before publishing, preventing the recurring `NETSDK1047` assets-graph mismatch.
+- Replaced the build workflow with a RID-consistent build/test/format/publish pipeline. It now validates tag/version alignment, verifies the published `requireAdministrator` manifest with `mt.exe`, creates the Inno installer, produces a PDB-free portable ZIP and SHA-256 file, uploads release artifacts, and creates a GitHub Release for matching `v*` tags.
+- Final Release build passes with 0 warnings/errors, all 39 tests pass, and `dotnet format --verify-no-changes` passes. The first sandboxed build hit a permissions/lock `CS2012` on an existing `obj` DLL; the serial build passed after running with approved write access. Explicit self-contained `win-x64` publish and Inno Setup 6.7.3 compilation passed. `mt.exe` extracted the final EXE resource and confirmed `requestedExecutionLevel level="requireAdministrator"`. The PDB-free portable ZIP contains 8 files and no PDB. Final local artifacts are `ThermoTray-Setup-1.0.1.exe` SHA-256 `0CA7FF6D2093BA1442F3E53F58D22D1B9282FDD38F5EB0DAEC44AAB996D71BF1` and `ThermoTray-1.0.1-win-x64-portable.zip` SHA-256 `526773937A2818133FB0A1A2CC54D0FC6952AFBF98D1A960B622C1337F934EC3`.
+- 2026-08-03 elevated runtime/UI verification was attempted against the new publish output but was blocked by the desktop environment: the elevated shell launch returned `Access denied`, and Computer Use lost its stream while waiting for the UAC/permission handoff. No claim of live CPU/GPU readings or visual UI verification is made for this revision; the user must manually launch the installer or publish EXE, accept UAC, and complete the README checklist.
+
+## 2026-08-03 CPU/GPU utilization implementation
+
+- Added `UtilizationReading` and `HardwareSnapshot`. `HardwareSensorService` now reads LibreHardwareMonitor `SensorType.Load` in the same one-pass sample as temperatures.
+- CPU utilization accepts only named aggregate sensors (`CPU Total` or `Total`); GPU utilization accepts `GPU Core`, `GPU Total`, or `Core`. It never substitutes a per-core load, estimates a value, or treats missing data as zero. Zero percent is accepted as a valid idle reading.
+- The main window now displays CPU/GPU utilization above temperature. Both tray icons now draw utilization on the top line and temperature on the bottom line, with tooltips containing both labelled values. GPU presence remains fail-closed but now stays visible when either GPU temperature or GPU utilization is readable.
+- Diagnostics now records both temperature and load sensors. Added utilization validity and culture-independent tray-formatting tests. Bumped product version to 1.1.0; final validation is recorded below.
+- Final 1.1.0 validation: Release build passed with 0 warnings/errors; 57 tests passed; `dotnet format --verify-no-changes` and `git diff --check` passed. Self-contained `win-x64` publish and Inno Setup 6.7.3 compilation passed. `mt.exe` confirmed the published EXE manifest remains `requireAdministrator`. The PDB-free portable ZIP contains 8 files. Final artifacts are `ThermoTray-Setup-1.1.0.exe` SHA-256 `6E48012522E2A25E714DAE5272B86407A185FEDC0DF5B89B02F7EA3470532B52` and `ThermoTray-1.1.0-win-x64-portable.zip` SHA-256 `D31A39009E0577489148682772A58CA561581ADD6B8314C119A7B97E4F65A238`.
+- The existing LocalAppData diagnostics file was not updated by a non-apphost `dotnet exec` attempt, so no live CPU/GPU `Load` sensor value is claimed for this revision. Manual launch of the 1.1.0 publish or installer remains the runtime proof step.
+
+## 2026-08-03 tray number readability follow-up
+
+- User reported that the CPU/GPU utilization and temperature digits in the notification-area icons were too small. `TrayIconService` now draws the numeric digits at a larger bold size and renders `%`/`°` as a separate smaller suffix, while fitting three-digit values inside the 64px icon. The top line remains utilization and the bottom line remains temperature.
+- The first build attempt after this change failed because the new code passed `StringFormat` to an unsupported `Graphics.MeasureString` overload. Replaced those measurements with the supported direct-width overload; no related runtime behavior was changed.
+- Validation after correction: Release build passed with 0 warnings/errors; 57 tests passed; `dotnet format --verify-no-changes --no-restore` passed. Self-contained `win-x64` publish passed, the published executable reports file version `1.1.0.0`, and `mt.exe` confirmed the embedded `requireAdministrator` manifest.
+- Rebuilt portable artifact: `artifacts\\release\\ThermoTray-1.1.0-win-x64-portable.zip` contains 8 files with no PDB, size 67,453,313 bytes, SHA-256 `3FF3D9121F62DDC198419660841930711A4D2EA5915180E24C86C1C490194C6D`. Inno Setup is not installed in this environment, so the 1.1.0 installer could not be regenerated for this visual-only update.
+- Elevated live tray/UI verification remains pending. Do not claim the enlarged appearance or live hardware readings as runtime-proven until the user launches the new publish output or installer and accepts UAC.
+
+## 2026-08-03 tray number readability follow-up 2
+
+- User requested the tray numbers to be larger again and asked to remove the units from the tray icon. `TrayIconService` now renders only unitless numeric digits, with utilization on the top line and temperature on the bottom line. The fitting font increased to 42px with a 28px minimum so two-digit values are larger while three-digit values still fit.
+- Validation: Release build passed with 0 warnings/errors; 57 tests passed; `dotnet format --verify-no-changes --no-restore` and `git diff --check` passed. Self-contained `win-x64` publish passed and the published executable reports file version `1.1.0.0`.
+- Rebuilt portable artifact: `artifacts\\release\\ThermoTray-1.1.0-win-x64-portable.zip` contains 8 files with no PDB, size 67,453,740 bytes, SHA-256 `81101B62CAD4B7B15971E504E061CA4054C3DC4D031BCFF702CF8F3640E1B131`. Inno Setup is still unavailable in this environment, so no installer was regenerated.
+- Elevated live tray/UI verification remains pending; the user must launch the new publish output or portable ZIP and accept UAC to confirm the final visual size on the actual notification area.
+
+## 2026-08-03 tray icon transparency and size follow-up
+
+- User requested tray digits approximately the same visual size as the Windows battery percentage and asked for no background. `TrayIconService` now clears the icon bitmap with transparent pixels, removes the dark background and divider line, and increases the fitting digit font from 42px to 52px with a 34px minimum. The icon still keeps utilization above temperature and remains unitless.
+- Validation: Release build passed with 0 warnings/errors; 57 tests passed; `dotnet format --verify-no-changes --no-restore` and `git diff --check` passed. Self-contained `win-x64` publish passed, and `mt.exe` confirmed the published manifest remains `requireAdministrator`.
+- Rebuilt portable artifact: `artifacts\\release\\ThermoTray-1.1.0-win-x64-portable.zip` contains 8 files with no PDB, size 67,453,633 bytes, SHA-256 `69F368193566C8502BDFF2CB8AC74C09F85A60A981F36C59A4FD917512B92088`. Inno Setup remains unavailable, so no installer was regenerated.
+- Elevated live visual verification remains pending. Do not claim the transparent rendering or final size as runtime-proven until the user launches the new portable build and accepts UAC.
+
+## 2026-08-03 tray row spacing follow-up
+
+- User requested more separation between the upper utilization digits and lower temperature digits. `TrayIconService` now shifts the upper line to `-2px` and the lower line to `35px`, creating a 4px larger vertical gap while preserving the 52px unitless digits and transparent background.
+- Validation: Release build passed with 0 warnings/errors; 57 tests passed; `dotnet format --verify-no-changes --no-restore` and `git diff --check` passed. Self-contained `win-x64` publish passed.
+- Rebuilt portable artifact: `artifacts\\release\\ThermoTray-1.1.0-win-x64-portable.zip` contains 8 files with no PDB, size 67,453,661 bytes, SHA-256 `4EC94721DA226013AF82493E92F916B12DCF4E254DADD40CD7A274B07E5EB3AA`. Inno Setup remains unavailable, so no installer was regenerated.
+- Elevated live visual verification remains pending; do not claim the exact final spacing as runtime-proven until the user launches the new portable build and accepts UAC.
+
+## 2026-08-03 GitHub publication blocked by authentication
+
+- User requested publication to GitHub and release of the executable. The repository is `https://github.com/nojackno2-ctrl/ThermoTray.git`, currently on `main` with the full intended ThermoTray change set uncommitted.
+- `gh` version `2.95.0` is installed, but `gh auth status` reports `The token in default is invalid` for `nojackno2-ctrl`. No commit, push, pull request, or GitHub Release was performed.
+- Resume with `gh auth login -h github.com`, then rerun `gh auth status` before staging. The intended release assets are the latest portable ZIP in `artifacts\\release` and the self-contained executable from `publish\\win-x64`; Inno Setup is unavailable locally, so no fresh installer exists.

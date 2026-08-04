@@ -164,9 +164,9 @@ public partial class App : System.Windows.Application
             report.AppendLine($"PawnIO kernel driver installed: {driver.IsInstalled}"
                 + (driver.IsInstalled ? $" (version {driver.Version})" : $" - install from {SensorDriverStatus.DownloadUrl}"));
             report.AppendLine($"Process elevated: {ElevationService.IsElevated} (PawnIO grants its device to elevated processes only)");
-            foreach (var sensor in sensorService.ReadRawTemperatureSensors())
+            foreach (var sensor in sensorService.ReadRawSensors())
             {
-                report.AppendLine($"{sensor.HardwareType} | {sensor.HardwareName} | {sensor.SensorName} | {sensor.Celsius?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}");
+                report.AppendLine($"{sensor.HardwareType} | {sensor.HardwareName} | {sensor.SensorType} | {sensor.SensorName} | {sensor.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}");
             }
 
             File.WriteAllText(outputPath, report.ToString());
