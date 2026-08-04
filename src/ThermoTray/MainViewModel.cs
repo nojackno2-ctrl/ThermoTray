@@ -7,7 +7,15 @@ namespace ThermoTray;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {
-    private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan VisiblePollingInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Used while the window is hidden in the tray, which is where this app spends nearly all of its
+    /// life. Only the tray icons are readable then, and reading hardware sensors is by far the most
+    /// expensive thing ThermoTray does, so halving the sample rate halves its idle CPU cost.
+    /// </summary>
+    private static readonly TimeSpan HiddenPollingInterval = TimeSpan.FromSeconds(2);
+
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
     private const long DriverProbeIntervalMilliseconds = 30_000;
 
@@ -26,6 +34,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _gpuEverReported;
     private int _gpuMissingSamples;
     private bool _isStopped;
+
+    // Read by the sampling thread and written by the UI thread, so it must not be cached in a register.
+    private volatile bool _isWindowVisible;
     private CancellationTokenSource? _pollingCancellation;
     private Task? _pollingTask;
     private long _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
@@ -187,11 +198,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         var cancellation = new CancellationTokenSource();
         _pollingCancellation = cancellation;
-        _pollingTask = PollAsync(cancellation.Token);
+
+        // The whole loop runs on the thread pool, so a sample never needs its own dispatch back onto it.
+        _pollingTask = Task.Run(() => PollAsync(cancellation.Token), CancellationToken.None);
 
         // schtasks can block for seconds, so the startup preference is reconciled off the UI thread.
         _ = Task.Run(ReconcileStartupSetting);
     }
+
+    /// <summary>
+    /// Tells the sampling loop whether anything other than the tray icons is on screen. The new rate
+    /// takes effect on the next tick rather than immediately, which keeps the loop free of extra
+    /// cross-thread signalling for a change worth at most one interval.
+    /// </summary>
+    public void SetWindowVisible(bool isVisible) => _isWindowVisible = isVisible;
 
     public void Stop()
     {
@@ -240,24 +260,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task PollAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(PollingInterval);
+        var interval = CurrentPollingInterval;
+        using var timer = new PeriodicTimer(interval);
 
         try
         {
             do
             {
-                try
-                {
-                    var snapshot = await Task.Run(_sensorService.Read, cancellationToken).ConfigureAwait(false);
-                    Post(() => ApplySnapshot(snapshot));
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested)
                 {
                     break;
+                }
+
+                try
+                {
+                    var snapshot = _sensorService.Read();
+                    Post(() => ApplySnapshot(snapshot));
                 }
                 catch (Exception)
                 {
                     Post(() => StatusMessage = T["SensorError"]);
+                }
+
+                var desiredInterval = CurrentPollingInterval;
+                if (desiredInterval != interval)
+                {
+                    interval = desiredInterval;
+                    timer.Period = interval;
                 }
             }
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
@@ -267,6 +296,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             // Normal shutdown.
         }
     }
+
+    private TimeSpan CurrentPollingInterval => GetPollingInterval(_isWindowVisible);
+
+    internal static TimeSpan GetPollingInterval(bool isWindowVisible) =>
+        isWindowVisible ? VisiblePollingInterval : HiddenPollingInterval;
 
     /// <summary>
     /// Queues UI work without awaiting it. Awaiting would make the polling loop depend on the UI

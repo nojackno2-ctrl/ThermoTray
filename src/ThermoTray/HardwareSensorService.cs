@@ -5,6 +5,11 @@ namespace ThermoTray;
 /// <summary>Reads hardware sensors only. It deliberately has no estimated-temperature path.</summary>
 public sealed class HardwareSensorService : IDisposable
 {
+    private const float CpuMinimumCelsius = 1;
+    private const float CpuMaximumCelsius = 125;
+    private const float GpuMinimumCelsius = 1;
+    private const float GpuMaximumCelsius = 150;
+
     private static readonly string[] CpuPreferredNames = ["Tctl/Tdie", "Package", "CPU Package", "Core Average"];
     private static readonly string[] GpuPreferredNames = ["GPU Core", "Core", "Hot Spot"];
     private static readonly UpdateVisitor HardwareUpdater = new();
@@ -15,22 +20,31 @@ public sealed class HardwareSensorService : IDisposable
         IsGpuEnabled = true,
     };
 
+    private readonly HardwareEventHandler _onHardwareChanged;
+    private readonly SensorEventHandler _onSensorChanged;
     private readonly Dictionary<ISensor, string> _sourceNames = new(ReferenceEqualityComparer.Instance);
+
+    // Everything about a sensor that cannot change between samples is resolved once, when the
+    // hardware appears, so a sample only reads values and compares numbers.
+    private IHardware[] _hardware = [];
+    private CpuCandidate[] _cpuCandidates = [];
+    private GpuCandidate[] _gpuCandidates = [];
+
+    // Written by LibreHardwareMonitor's change events, which need not run on the sampling thread.
+    private volatile bool _topologyChanged;
     private bool _opened;
+
+    public HardwareSensorService()
+    {
+        _onHardwareChanged = _ => _topologyChanged = true;
+        _onSensorChanged = _ => _topologyChanged = true;
+    }
 
     public TemperatureSnapshot Read()
     {
         UpdateHardware();
 
-        var selection = new SensorSelection();
-        foreach (var hardware in _computer.Hardware)
-        {
-            SelectSensors(hardware, ref selection);
-        }
-
-        return new TemperatureSnapshot(
-            ToReading(selection.CpuPreferred.IsValid ? selection.CpuPreferred : selection.CpuFallback),
-            ToReading(selection.GpuPreferred.IsValid ? selection.GpuPreferred : selection.GpuFallback));
+        return new TemperatureSnapshot(SelectCpuReading(), SelectGpuReading());
     }
 
     public IReadOnlyList<RawTemperatureSensor> ReadRawTemperatureSensors()
@@ -38,7 +52,7 @@ public sealed class HardwareSensorService : IDisposable
         UpdateHardware();
 
         var sensors = new List<RawTemperatureSensor>();
-        foreach (var hardware in _computer.Hardware)
+        foreach (var hardware in _hardware)
         {
             AppendRawTemperatureSensors(hardware, sensors);
         }
@@ -50,6 +64,15 @@ public sealed class HardwareSensorService : IDisposable
     {
         EnsureOpen();
         _computer.Accept(HardwareUpdater);
+
+        // The scan runs after the update because a hardware update is what activates sensors, so a
+        // sensor that appears on this pass is still selectable in this sample. The flag is cleared
+        // first, so anything that appears during the scan is picked up next sample instead of lost.
+        if (_topologyChanged)
+        {
+            _topologyChanged = false;
+            RefreshTopology();
+        }
     }
 
     private void EnsureOpen()
@@ -59,91 +82,162 @@ public sealed class HardwareSensorService : IDisposable
             return;
         }
 
+        _computer.HardwareAdded += _onHardwareChanged;
+        _computer.HardwareRemoved += _onHardwareChanged;
         _computer.Open();
         _opened = true;
+        _topologyChanged = false;
+        RefreshTopology();
     }
 
-    private static void SelectSensors(IHardware hardware, ref SensorSelection selection)
+    /// <summary>
+    /// Rebuilds the cached sensor lists. <see cref="Computer.Hardware"/> and <see cref="IHardware.Sensors"/>
+    /// both copy into a fresh array on every call, and the sensor-name matching below is pure string
+    /// work, so all of it is done here rather than once per sample.
+    /// </summary>
+    private void RefreshTopology()
     {
-        if (hardware.HardwareType == HardwareType.Cpu)
+        var hardware = _computer.Hardware;
+        var roots = new IHardware[hardware.Count];
+        hardware.CopyTo(roots, 0);
+        _hardware = roots;
+
+        var cpuCandidates = new List<CpuCandidate>();
+        var gpuCandidates = new List<GpuCandidate>();
+        foreach (var root in roots)
         {
-            SelectCpuSensors(hardware, ref selection);
-        }
-        else if (hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
-        {
-            SelectGpuSensors(hardware, ref selection);
+            CollectCandidates(root, cpuCandidates, gpuCandidates);
         }
 
-        foreach (var subHardware in hardware.SubHardware)
-        {
-            SelectSensors(subHardware, ref selection);
-        }
+        _cpuCandidates = cpuCandidates.ToArray();
+        _gpuCandidates = gpuCandidates.ToArray();
     }
 
-    private static void SelectCpuSensors(IHardware hardware, ref SensorSelection selection)
+    private void CollectCandidates(IHardware hardware, List<CpuCandidate> cpuCandidates, List<GpuCandidate> gpuCandidates)
     {
-        foreach (var sensor in hardware.Sensors)
-        {
-            if (!TryGetTemperature(sensor, minimumCelsius: 1, maximumCelsius: 125, out var celsius))
-            {
-                continue;
-            }
+        // Subscribing twice would raise the flag twice; removing an absent handler is a no-op, so this
+        // stays correct across the repeated scans that a hardware change triggers.
+        hardware.SensorAdded -= _onSensorChanged;
+        hardware.SensorAdded += _onSensorChanged;
+        hardware.SensorRemoved -= _onSensorChanged;
+        hardware.SensorRemoved += _onSensorChanged;
 
-            var candidate = new SensorCandidate(hardware, sensor, celsius);
-            var preferredRank = GetPreferredRank(sensor.Name, CpuPreferredNames);
-            if (preferredRank < selection.CpuPreferredRank)
-            {
-                selection.CpuPreferred = candidate;
-                selection.CpuPreferredRank = preferredRank;
-            }
-
-            if (!selection.CpuFallback.IsValid || celsius > selection.CpuFallback.Celsius)
-            {
-                selection.CpuFallback = candidate;
-            }
-        }
-    }
-
-    private static void SelectGpuSensors(IHardware hardware, ref SensorSelection selection)
-    {
+        var isCpu = hardware.HardwareType == HardwareType.Cpu;
+        var isGpu = hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
         var hardwarePriority = hardware.HardwareType == HardwareType.GpuIntel
             ? GpuSensorRank.IntegratedPriority
             : GpuSensorRank.DiscretePriority;
 
         foreach (var sensor in hardware.Sensors)
         {
-            if (!TryGetTemperature(sensor, minimumCelsius: 1, maximumCelsius: 150, out var celsius))
+            DisableValueHistory(sensor);
+
+            if (sensor.SensorType != SensorType.Temperature)
             {
                 continue;
             }
 
-            var candidate = new SensorCandidate(hardware, sensor, celsius);
-            var sequence = selection.GpuSequence++;
-
-            var preferredRank = new GpuSensorRank(
-                GetPreferredRank(sensor.Name, GpuPreferredNames),
-                hardwarePriority,
-                sequence);
-            if (preferredRank.IsBetterThan(selection.GpuPreferredRank))
+            if (isCpu)
             {
-                selection.GpuPreferred = candidate;
-                selection.GpuPreferredRank = preferredRank;
+                cpuCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuPreferredNames)));
             }
-
-            // The fallback ignores the sensor name so an unrecognised GPU still reports something.
-            var fallbackRank = new GpuSensorRank(GpuSensorRank.AnyName, hardwarePriority, sequence);
-            if (fallbackRank.IsBetterThan(selection.GpuFallbackRank))
+            else if (isGpu)
             {
-                selection.GpuFallback = candidate;
-                selection.GpuFallbackRank = fallbackRank;
+                // Discovery order is the last tiebreaker, so the position in this list is the sequence.
+                var sequence = gpuCandidates.Count;
+                gpuCandidates.Add(new GpuCandidate(
+                    hardware,
+                    sensor,
+                    new GpuSensorRank(GetPreferredRank(sensor.Name, GpuPreferredNames), hardwarePriority, sequence),
+                    // The fallback ignores the sensor name so an unrecognised GPU still reports something.
+                    new GpuSensorRank(GpuSensorRank.AnyName, hardwarePriority, sequence)));
             }
         }
+
+        foreach (var subHardware in hardware.SubHardware)
+        {
+            CollectCandidates(subHardware, cpuCandidates, gpuCandidates);
+        }
+    }
+
+    /// <summary>
+    /// LibreHardwareMonitor keeps a day of averaged history for every sensor it exposes, including the
+    /// dozens ThermoTray never displays. ThermoTray only ever shows the current value, so in a process
+    /// that stays running that history is pure growth: each list fills all day, and once it is full every
+    /// later update shifts the whole list down to drop the expired entry. Turning the window off keeps
+    /// both the memory and the per-update cost flat.
+    /// </summary>
+    private static void DisableValueHistory(ISensor sensor)
+    {
+        if (sensor.ValuesTimeWindow != TimeSpan.Zero)
+        {
+            sensor.ValuesTimeWindow = TimeSpan.Zero;
+        }
+    }
+
+    private TemperatureReading SelectCpuReading()
+    {
+        SensorCandidate preferred = default;
+        var preferredRank = int.MaxValue;
+        SensorCandidate fallback = default;
+
+        foreach (var candidate in _cpuCandidates)
+        {
+            if (!TryGetTemperature(candidate.Sensor, CpuMinimumCelsius, CpuMaximumCelsius, out var celsius))
+            {
+                continue;
+            }
+
+            if (candidate.NameRank < preferredRank)
+            {
+                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+                preferredRank = candidate.NameRank;
+            }
+
+            if (!fallback.IsValid || celsius > fallback.Celsius)
+            {
+                fallback = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+            }
+        }
+
+        return ToReading(preferred.IsValid ? preferred : fallback);
+    }
+
+    private TemperatureReading SelectGpuReading()
+    {
+        SensorCandidate preferred = default;
+        var preferredRank = GpuSensorRank.None;
+        SensorCandidate fallback = default;
+        var fallbackRank = GpuSensorRank.None;
+
+        foreach (var candidate in _gpuCandidates)
+        {
+            if (!TryGetTemperature(candidate.Sensor, GpuMinimumCelsius, GpuMaximumCelsius, out var celsius))
+            {
+                continue;
+            }
+
+            if (candidate.PreferredRank.IsBetterThan(preferredRank))
+            {
+                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+                preferredRank = candidate.PreferredRank;
+            }
+
+            if (candidate.FallbackRank.IsBetterThan(fallbackRank))
+            {
+                fallback = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+                fallbackRank = candidate.FallbackRank;
+            }
+        }
+
+        return ToReading(preferred.IsValid ? preferred : fallback);
     }
 
     private static bool TryGetTemperature(ISensor sensor, float minimumCelsius, float maximumCelsius, out float celsius)
     {
-        celsius = sensor.Value.GetValueOrDefault();
-        return IsUsableTemperature(sensor.SensorType, sensor.Value, minimumCelsius, maximumCelsius);
+        var value = sensor.Value;
+        celsius = value.GetValueOrDefault();
+        return IsUsableTemperature(sensor.SensorType, value, minimumCelsius, maximumCelsius);
     }
 
     /// <summary>
@@ -213,30 +307,45 @@ public sealed class HardwareSensorService : IDisposable
             return;
         }
 
+        _computer.HardwareAdded -= _onHardwareChanged;
+        _computer.HardwareRemoved -= _onHardwareChanged;
+        foreach (var hardware in _hardware)
+        {
+            UnsubscribeSensorEvents(hardware);
+        }
+
         _computer.Close();
+        _hardware = [];
+        _cpuCandidates = [];
+        _gpuCandidates = [];
         _sourceNames.Clear();
         _opened = false;
     }
 
+    private void UnsubscribeSensorEvents(IHardware hardware)
+    {
+        hardware.SensorAdded -= _onSensorChanged;
+        hardware.SensorRemoved -= _onSensorChanged;
+
+        foreach (var subHardware in hardware.SubHardware)
+        {
+            UnsubscribeSensorEvents(subHardware);
+        }
+    }
+
+    /// <summary>A CPU temperature sensor with its sensor-name preference resolved at discovery time.</summary>
+    private readonly record struct CpuCandidate(IHardware Hardware, ISensor Sensor, int NameRank);
+
+    /// <summary>A GPU temperature sensor with both of its rankings resolved at discovery time.</summary>
+    private readonly record struct GpuCandidate(
+        IHardware Hardware,
+        ISensor Sensor,
+        GpuSensorRank PreferredRank,
+        GpuSensorRank FallbackRank);
+
     private readonly record struct SensorCandidate(IHardware? Hardware, ISensor? Sensor, float Celsius)
     {
         public bool IsValid => Sensor is not null;
-    }
-
-    private struct SensorSelection
-    {
-        public SensorCandidate CpuPreferred;
-        public int CpuPreferredRank = int.MaxValue;
-        public SensorCandidate CpuFallback;
-        public SensorCandidate GpuPreferred;
-        public GpuSensorRank GpuPreferredRank = GpuSensorRank.None;
-        public SensorCandidate GpuFallback;
-        public GpuSensorRank GpuFallbackRank = GpuSensorRank.None;
-        public int GpuSequence;
-
-        public SensorSelection()
-        {
-        }
     }
 
     private sealed class UpdateVisitor : IVisitor
