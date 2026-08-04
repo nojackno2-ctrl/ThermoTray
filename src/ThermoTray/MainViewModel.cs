@@ -31,10 +31,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private long _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
     private TemperatureReading? _lastCpuReading;
     private TemperatureReading? _lastGpuReading;
+    private UtilizationReading? _lastCpuUsage;
+    private UtilizationReading? _lastGpuUsage;
     private string _cpuTemperature = "…";
     private string _gpuTemperature = "…";
+    private string _cpuUsage = "…";
+    private string _gpuUsage = "…";
     private string _cpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
     private string _gpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
+    private string _cpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
+    private string _gpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
     private string _cpuSource = string.Empty;
     private string _gpuSource = string.Empty;
     private string _statusMessage;
@@ -66,6 +72,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _gpuTemperature, value);
     }
 
+    public string CpuUsage
+    {
+        get => _cpuUsage;
+        private set => SetField(ref _cpuUsage, value);
+    }
+
+    public string GpuUsage
+    {
+        get => _gpuUsage;
+        private set => SetField(ref _gpuUsage, value);
+    }
+
     /// <summary>Whole degrees for the tray icon, independent of the current culture's number format.</summary>
     public string CpuTrayDigits
     {
@@ -77,6 +95,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get => _gpuTrayDigits;
         private set => SetField(ref _gpuTrayDigits, value);
+    }
+
+    /// <summary>Whole percentage points for the tray icon, independent of the current culture.</summary>
+    public string CpuUsageTrayDigits
+    {
+        get => _cpuUsageTrayDigits;
+        private set => SetField(ref _cpuUsageTrayDigits, value);
+    }
+
+    public string GpuUsageTrayDigits
+    {
+        get => _gpuUsageTrayDigits;
+        private set => SetField(ref _gpuUsageTrayDigits, value);
     }
 
     public string CpuSource
@@ -105,9 +136,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// False once this machine has gone long enough without a single GPU reading to conclude that
-    /// it has no readable GPU sensor. Its tray icon and card are then hidden instead of showing a
-    /// warning that can never be resolved.
+    /// False once this machine has gone long enough without a single GPU temperature or usage
+    /// reading to conclude that it has no readable GPU telemetry. Its tray icon and card are then
+    /// hidden instead of showing a warning that can never be resolved.
     /// </summary>
     public bool IsGpuPresent
     {
@@ -173,6 +204,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             SaveSettings();
             _lastCpuReading = null;
             _lastGpuReading = null;
+            _lastCpuUsage = null;
+            _lastGpuUsage = null;
             StatusMessage = T["WaitingForSensors"];
             OnPropertyChanged(string.Empty);
         }
@@ -289,31 +322,45 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private void ApplySnapshot(TemperatureSnapshot snapshot)
+    private void ApplySnapshot(HardwareSnapshot snapshot)
     {
-        if (_lastCpuReading != snapshot.Cpu)
+        if (_lastCpuReading != snapshot.CpuTemperature)
         {
-            _lastCpuReading = snapshot.Cpu;
-            CpuTemperature = Format(snapshot.Cpu);
-            CpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.Cpu);
-            CpuSource = snapshot.Cpu.Source;
+            _lastCpuReading = snapshot.CpuTemperature;
+            CpuTemperature = Format(snapshot.CpuTemperature);
+            CpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.CpuTemperature);
+            CpuSource = snapshot.CpuTemperature.Source;
         }
 
-        if (_lastGpuReading != snapshot.Gpu)
+        if (_lastGpuReading != snapshot.GpuTemperature)
         {
-            _lastGpuReading = snapshot.Gpu;
-            GpuTemperature = Format(snapshot.Gpu);
-            GpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.Gpu);
-            GpuSource = snapshot.Gpu.Source;
+            _lastGpuReading = snapshot.GpuTemperature;
+            GpuTemperature = Format(snapshot.GpuTemperature);
+            GpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.GpuTemperature);
+            GpuSource = snapshot.GpuTemperature.Source;
         }
 
-        UpdateGpuPresence(snapshot.Gpu);
+        if (_lastCpuUsage != snapshot.CpuUsage)
+        {
+            _lastCpuUsage = snapshot.CpuUsage;
+            CpuUsage = FormatUsage(snapshot.CpuUsage);
+            CpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.CpuUsage);
+        }
+
+        if (_lastGpuUsage != snapshot.GpuUsage)
+        {
+            _lastGpuUsage = snapshot.GpuUsage;
+            GpuUsage = FormatUsage(snapshot.GpuUsage);
+            GpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.GpuUsage);
+        }
+
+        UpdateGpuPresence(snapshot.GpuTemperature, snapshot.GpuUsage);
         StatusMessage = GetAvailabilityMessage(snapshot);
     }
 
-    private void UpdateGpuPresence(TemperatureReading gpu)
+    private void UpdateGpuPresence(TemperatureReading gpuTemperature, UtilizationReading gpuUsage)
     {
-        if (gpu.IsAvailable)
+        if (gpuTemperature.IsAvailable || gpuUsage.IsAvailable)
         {
             _gpuEverReported = true;
             _gpuMissingSamples = 0;
@@ -335,35 +382,54 @@ public sealed class MainViewModel : INotifyPropertyChanged
         IsGpuPresent = _gpuMissingSamples < MissingGpuGraceSamples;
     }
 
-    private string GetAvailabilityMessage(TemperatureSnapshot snapshot)
+    private string GetAvailabilityMessage(HardwareSnapshot snapshot)
     {
-        // A machine with no readable GPU is not a fault and must not raise a permanent warning.
-        var gpuReported = snapshot.Gpu.IsAvailable || !IsGpuPresent;
-
-        if (snapshot.Cpu.IsAvailable)
+        if (!snapshot.CpuTemperature.IsAvailable)
         {
-            IsDriverActionVisible = false;
-            return gpuReported ? string.Empty : T["GpuSensorUnavailable"];
+            // The driver can be installed while ThermoTray runs, so re-probe instead of trusting the startup value.
+            if (!_driverStatus.IsInstalled && Environment.TickCount64 >= _nextDriverProbeTick)
+            {
+                _driverStatus = SensorDriverStatus.Query();
+                _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
+            }
+
+            IsDriverActionVisible = !_driverStatus.IsInstalled;
+            if (IsDriverActionVisible)
+            {
+                return T["DriverMissing"];
+            }
+
+            return snapshot.GpuTemperature.IsAvailable || snapshot.GpuUsage.IsAvailable
+                ? T["CpuSensorUnavailable"]
+                : T["NoSensor"];
         }
 
-        // The driver can be installed while ThermoTray runs, so re-probe instead of trusting the startup value.
-        if (!_driverStatus.IsInstalled && Environment.TickCount64 >= _nextDriverProbeTick)
+        IsDriverActionVisible = false;
+        if (!snapshot.CpuUsage.IsAvailable)
         {
-            _driverStatus = SensorDriverStatus.Query();
-            _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
+            return T["CpuUsageUnavailable"];
         }
 
-        IsDriverActionVisible = !_driverStatus.IsInstalled;
-        if (IsDriverActionVisible)
+        // A machine with no readable GPU telemetry is not a fault and must not raise a permanent warning.
+        if (!IsGpuPresent)
         {
-            return T["DriverMissing"];
+            return string.Empty;
         }
 
-        return snapshot.Gpu.IsAvailable ? T["CpuSensorUnavailable"] : T["NoSensor"];
+        if (!snapshot.GpuTemperature.IsAvailable)
+        {
+            return T["GpuSensorUnavailable"];
+        }
+
+        return snapshot.GpuUsage.IsAvailable ? string.Empty : T["GpuUsageUnavailable"];
     }
 
     private string Format(TemperatureReading reading) => reading.Celsius is decimal celsius
         ? $"{celsius:0.#} °C"
+        : T["Unavailable"];
+
+    private string FormatUsage(UtilizationReading reading) => reading.Percent is decimal percent
+        ? $"{percent:0.#}%"
         : T["Unavailable"];
 
     private void SaveSettings()

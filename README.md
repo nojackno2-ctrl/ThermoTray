@@ -22,8 +22,9 @@ PawnIO 只把裝置開放給**已提權**的處理程序。ThermoTray 的執行�
 
 - 顯示 CPU 套件 / Tctl-Tdie 與主要 GPU Core 的實際溫度。
 - 感測器、權限或驅動程式不支援時顯示「無法取得」，而不是 `0 °C` 或估算值。
+- 顯示 CPU 與 GPU 使用率；0% 是合法的閒置狀態，讀不到時顯示「無法取得」。
 - 每秒一次背景取樣；取樣熱路徑避免建立暫存陣列，托盤圖示也只在顯示數字改變時重繪。
-- 系統匣使用兩個獨立圖示，分別顯示 CPU 與 GPU 溫度；每個圖示都有較大的單一數字與帶標籤的提示文字。三位數（100 °C 以上）會自動縮小字級以免被裁切。
+- 系統匣使用兩個獨立圖示，分別顯示 CPU 與 GPU；每個圖示上方顯示使用率、下方顯示溫度，並提供帶標籤的提示文字。三位數會自動縮小字級以免被裁切。
 - 沒有可讀取 GPU 感測器的機器（例如純內顯且驅動程式不提供數值）會隱藏 GPU 卡片與托盤圖示，不會永久顯示無法解決的警告。
 - 只允許單一執行個體；重複啟動會喚醒既有視窗，而不是產生第二組托盤圖示與第二個硬體輪詢。
 - 關閉或最小化時隱藏到系統匣，按兩下圖示即可恢復。
@@ -43,18 +44,33 @@ dotnet test .\ThermoTray.sln -c Release
 4. 需要可攜的單一執行檔時，執行：
 
 ```powershell
-dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\publish\win-x64
+dotnet restore .\ThermoTray.sln -r win-x64
+dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --no-restore -o .\publish\win-x64
 ```
 
 版本號的唯一來源是 `Directory.Build.props` 的 `<Version>`；安裝指令碼與 GitHub Actions 都從該處讀取，改版時只需修改一個位置。
 
 ### 建立安裝檔
 
-安裝 [Inno Setup](https://jrsoftware.org/isinfo.php)，以 Inno Setup Compiler 開啟 `installer\ThermoTray.iss` 並編譯（命令列可用 `ISCC.exe /DAppVersion=1.0.0 installer\ThermoTray.iss` 指定版本）。它會使用 `publish\win-x64` 的輸出，安裝檔生成於 `artifacts\installer`。安裝精靈安裝到目前使用者的 LocalAppData，本身不需系統管理員權限；啟動 ThermoTray 時才會顯示 UAC。登入自動啟動請在程式內勾選「隨 Windows 啟動」。安裝精靈使用英文；已安裝的 ThermoTray 本身可切換繁體中文與英文。
+安裝 [Inno Setup](https://jrsoftware.org/isinfo.php)，以 Inno Setup Compiler 開啟 `installer\ThermoTray.iss` 並編譯（命令列可用 `ISCC.exe /DAppVersion=1.1.0 installer\ThermoTray.iss` 指定版本）。它會使用 `publish\win-x64` 的輸出，安裝檔生成於 `artifacts\installer`。安裝精靈安裝到目前使用者的 LocalAppData，本身不需系統管理員權限；啟動 ThermoTray 時才會顯示 UAC。登入自動啟動請在程式內勾選「隨 Windows 啟動」。安裝精靈使用英文；已安裝的 ThermoTray 本身可切換繁體中文與英文。
 
 ### 溫度正確性說明
 
 溫度的正確性上限受主機板 BIOS、CPU/GPU 驅動程式與裝置本身提供的感測器影響。ThermoTray 的保證是：只顯示讀到的感測器數值；沒有可靠讀值時不顯示數字。部分筆電、VM、遠端工作階段或沒有驅動程式的 GPU 可能沒有可用數值。
+
+### 安裝後快速驗證
+
+1. 確認 PawnIO 已安裝，然後啟動 ThermoTray 並接受 UAC。
+2. 等待一至兩秒，確認 CPU 與 GPU 卡片顯示使用率與溫度；0% 是合法的閒置狀態，沒有可靠讀值時應顯示「無法取得」，不應顯示 `0 °C` 冒充溫度。
+3. 確認系統匣中 CPU 圖示位於 GPU 圖示左側。Windows 可能記住使用者手動拖曳過的圖示位置，因此必要時請在通知區重新排列。
+4. 測試「關閉時縮小至系統匣」、再次啟動程式喚回視窗，以及「隨 Windows 啟動」。後者應建立 `ThermoTray` 的 `RL HIGHEST` 登入排程工作。
+
+### 疑難排解
+
+- GPU 有數值但 CPU 顯示「無法取得」：先確認 PawnIO 已安裝，再完全結束並重新啟動 ThermoTray；CPU 讀值需要提權處理程序。
+- 拒絕 UAC：程式不會啟動，這是直接讀取 CPU 暫存器的必要條件。
+- 只有內顯或 GPU 驅動程式沒有提供溫度：GPU 卡片與圖示會在幾次取樣後隱藏，CPU 仍可獨立使用。
+- 若要提交問題，請附上 Windows 版本、CPU/GPU 型號、PawnIO 版本，以及是否已接受 UAC；不要用估算值取代缺失的感測器讀值。
 
 ## English
 
@@ -62,6 +78,10 @@ ThermoTray is a lightweight Windows CPU/GPU temperature monitor. It reads physic
 
 **Prerequisites for CPU temperature:** LibreHardwareMonitor 0.9.6 reads CPU registers through the [PawnIO](https://pawnio.eu/) kernel driver instead of WinRing0, and PawnIO grants its device to elevated processes only. ThermoTray therefore requests administrator rights in its application manifest and shows Windows UAC on every normal launch; declining the prompt prevents the application from starting. AMD Ryzen otherwise reports `Core (Tctl/Tdie)` as a constant 0, which ThermoTray rejects. NVIDIA GPU readings go through NVAPI and do not require PawnIO. "Start with Windows" registers an `RL HIGHEST` logon task for prompt-free elevated startup; `HKCU\Run` is no longer used.
 
-It samples in the background every second, avoids temporary arrays in the sampling hot path, and redraws a tray icon only when its displayed digits change. It shows CPU and GPU values in separate tray icons and labelled tooltips, shrinks the icon font so three-digit readings are not clipped, hides the GPU card and icon entirely on machines that never report a GPU temperature, and allows only one running instance (a second launch raises the existing window). It supports English and Traditional Chinese, can hide to the tray, and can start with the current Windows user.
+It samples in the background every second, avoids temporary arrays in the sampling hot path, and redraws a tray icon only when its displayed digits change. It shows CPU/GPU utilization and temperature in the main window and in separate tray icons; each icon places utilization above temperature and provides a labelled tooltip. It shrinks the icon font so three-digit readings are not clipped, hides the GPU card and icon entirely on machines that never report GPU telemetry, and allows only one running instance (a second launch raises the existing window). It supports English and Traditional Chinese, can hide to the tray, and can start with the current Windows user.
 
 Build it with Visual Studio 2022 / .NET 8 using `ThermoTray.sln` and run `dotnet test .\ThermoTray.sln -c Release` for the unit tests covering sensor ranking, temperature validation, tray formatting, and localization. `<Version>` in `Directory.Build.props` is the single source of the product version; the installer script and CI both read it from there. Packaging instructions are above.
+
+After installation, accept UAC and wait one or two seconds for the first sample. CPU/GPU utilization and temperature are shown together; 0% is a valid idle reading, while missing data is shown as `Unavailable` and never as `0 °C` for temperature. Each tray icon places utilization above temperature. The CPU tray icon should be left of the GPU icon unless Windows has preserved a manually rearranged notification-area order. The startup option creates a `ThermoTray` logon task with `RL HIGHEST` so it can start elevated without another UAC prompt.
+
+For a tagged GitHub release, push a tag matching the version in `Directory.Build.props`, such as `v1.1.0`. The workflow verifies the tag, publishes the self-contained `win-x64` build, creates the Inno Setup installer, creates a PDB-free portable ZIP, verifies the embedded `requireAdministrator` manifest, and publishes SHA-256 checksums with the release assets.

@@ -1,42 +1,107 @@
-name: Build
+name: Build and Release
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Read version
+      - name: Read and validate version
         shell: pwsh
         run: |
           $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
           if (-not $version) { throw 'Version is not defined in Directory.Build.props' }
+          if ($env:GITHUB_REF.StartsWith('refs/tags/v')) {
+            $tagVersion = $env:GITHUB_REF_NAME.Substring(1)
+            if ($tagVersion -ne $version) {
+              throw "Git tag v$tagVersion does not match Directory.Build.props version $version"
+            }
+          }
           "AppVersion=$version" >> $env:GITHUB_ENV
 
-      - run: dotnet restore ThermoTray.sln
+      # Restore with the publish RID up front so later build/publish commands share one assets graph.
+      - run: dotnet restore ThermoTray.sln --runtime win-x64
       - run: dotnet build ThermoTray.sln --configuration Release --no-restore
-      - run: dotnet test ThermoTray.sln --configuration Release --no-build
+      - run: dotnet test ThermoTray.sln --configuration Release --no-build --no-restore
       - run: dotnet format ThermoTray.sln --verify-no-changes --no-restore --verbosity minimal
 
-      - run: dotnet publish src/ThermoTray/ThermoTray.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output publish/win-x64
-      - run: choco install innosetup --no-progress --yes
-      - run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:AppVersion installer\ThermoTray.iss'
+      - name: Publish self-contained application
+        run: dotnet publish src/ThermoTray/ThermoTray.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --no-restore --output publish/win-x64
+
+      - name: Verify embedded administrator manifest
         shell: pwsh
+        run: |
+          $mt = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter mt.exe -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $mt) { throw 'Windows SDK Manifest Tool (mt.exe) was not found' }
+
+          New-Item -ItemType Directory -Force -Path artifacts/verification | Out-Null
+          & $mt.FullName '-inputresource:publish/win-x64/ThermoTray.exe;#1' '-out:artifacts/verification/manifest.xml'
+          if ($LASTEXITCODE -ne 0) { throw "mt.exe failed with exit code $LASTEXITCODE" }
+
+          $manifest = Get-Content artifacts/verification/manifest.xml -Raw
+          if ($manifest -notmatch 'requestedExecutionLevel\s+level="requireAdministrator"') {
+            throw 'The published executable does not require administrator elevation'
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress --yes
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:AppVersion" installer/ThermoTray.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed with exit code $LASTEXITCODE" }
+
+      - name: Build portable archive and checksums
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'artifacts/release'
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+
+          $zipPath = Join-Path $releaseDir "ThermoTray-$env:AppVersion-win-x64-portable.zip"
+          Get-ChildItem publish/win-x64 -File |
+            Where-Object Extension -ne '.pdb' |
+            Compress-Archive -DestinationPath $zipPath -CompressionLevel Optimal
+
+          $installerPath = "artifacts/installer/ThermoTray-Setup-$env:AppVersion.exe"
+          if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw "Installer was not created: $installerPath"
+          }
+          Copy-Item -LiteralPath $installerPath -Destination $releaseDir
+
+          $checksums = Get-ChildItem $releaseDir -File |
+            Where-Object Name -ne 'SHA256SUMS.txt' |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+              "$hash  $($_.Name)"
+            }
+          $checksums | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding utf8
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ThermoTray-win-x64
-          path: publish/win-x64
-      - uses: actions/upload-artifact@v4
+          name: ThermoTray-release-${{ env.AppVersion }}
+          path: artifacts/release
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          name: ThermoTray-installer
-          path: artifacts/installer/ThermoTray-Setup-${{ env.AppVersion }}.exe
+          files: artifacts/release/*
+          generate_release_notes: true
