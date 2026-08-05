@@ -94,4 +94,17 @@ public sealed class AppSettings
     /// 取得或設定 UI 語言設定（如 "zh-TW" 或 "en"）。預設為繁體中文。
     /// </summary>
     public string Language { get; set; } = Localizer.DefaultLanguage;
+
+    public bool ShowCpuUsageInTray { get; set; } = true;
+
+    public bool ShowCpuTemperatureInTray { get; set; } = true;
+
+    public Dictionary<string, TrayDisplaySettings> GpuTraySettings { get; set; } = new();
+}
+
+public sealed class TrayDisplaySettings
+{
+    public bool ShowUsage { get; set; } = true;
+
+    public bool ShowTemperature { get; set; } = true;
 }

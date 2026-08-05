@@ -25,7 +25,19 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         _fixture.Invoke(window =>
         {
             AssertContentFits(window.CpuCard, "CPU");
-            AssertContentFits(window.GpuCard, "GPU");
+            Assert.Equal(2, window.GpuCards.Items.Count);
+            Assert.True(window.GpuCards.ActualHeight > 0, "the independent GPU cards render nothing");
+        });
+
+    [Fact]
+    public void TheCpuDeviceNameIsTheFirstCardLineAndEachMetricHasATrayToggle() =>
+        _fixture.Invoke(window =>
+        {
+            var stack = (StackPanel)window.CpuCard.Child;
+
+            Assert.Equal("AMD Ryzen 9 5900HS with Radeon Graphics", ((TextBlock)stack.Children[0]).Text);
+            Assert.IsType<System.Windows.Controls.CheckBox>(((Grid)stack.Children[1]).Children[1]);
+            Assert.IsType<System.Windows.Controls.CheckBox>(((Grid)stack.Children[3]).Children[1]);
         });
 
     /// <summary>
@@ -90,8 +102,8 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
 /// </summary>
 public sealed class MainWindowFixture : IDisposable
 {
-    private const string LongCpuName = "AMD Ryzen 9 5900HS with Radeon Graphics • Core (Tctl/Tdie)";
-    private const string LongGpuName = "NVIDIA GeForce RTX 3060 Laptop GPU • GPU Core";
+    private const string LongCpuName = "AMD Ryzen 9 5900HS with Radeon Graphics";
+    private const string LongCpuSensorName = "Core (Tctl/Tdie)";
 
     private readonly Dispatcher _dispatcher;
     private readonly MainWindow _window;
@@ -188,10 +200,10 @@ public sealed class MainWindowFixture : IDisposable
         var viewModel = new MainViewModel(new HardwareSensorService(), new SettingsService(), new StartupService());
         SetField(viewModel, "_cpuUsage", "3.8%");
         SetField(viewModel, "_cpuTemperature", "61.8 °C");
-        SetField(viewModel, "_cpuSource", LongCpuName);
-        SetField(viewModel, "_gpuUsage", "16%");
-        SetField(viewModel, "_gpuTemperature", "51 °C");
-        SetField(viewModel, "_gpuSource", LongGpuName);
+        SetField(viewModel, "_cpuDeviceName", LongCpuName);
+        SetField(viewModel, "_cpuSource", LongCpuSensorName);
+        AddGpu(viewModel, "gpu-0", 0, "NVIDIA GeForce RTX 3060 Laptop GPU", 16, 51);
+        AddGpu(viewModel, "gpu-1", 1, "AMD Radeon(TM) Graphics", 5, 52);
 
         var window = new MainWindow
         {
@@ -210,4 +222,21 @@ public sealed class MainWindowFixture : IDisposable
         target.GetType()
             .GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(target, value);
+
+    private static void AddGpu(MainViewModel viewModel, string id, int index, string name, decimal usage, decimal temperature)
+    {
+        var gpu = new GpuViewModel(id);
+        gpu.Apply(
+            new GpuReading(
+                id,
+                name,
+                new TemperatureReading(temperature, $"{name} • GPU Core"),
+                new UtilizationReading(usage, $"{name} • GPU Core")),
+            index,
+            "GPU 使用率",
+            "GPU 溫度",
+            reading => reading.Celsius is decimal celsius ? $"{celsius:0.#} °C" : "無法取得",
+            reading => reading.Percent is decimal percent ? $"{percent:0.#}%" : "無法取得");
+        viewModel.GpuItems.Add(gpu);
+    }
 }

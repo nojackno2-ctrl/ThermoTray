@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
@@ -35,6 +36,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly StartupService _startupService;
     private readonly AppSettings _settings;
     private readonly Localizer _localizer;
+    private readonly ObservableCollection<GpuViewModel> _gpuItems = [];
+    private readonly ReadOnlyObservableCollection<GpuViewModel> _gpus;
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly object _startupGate = new();
     private SensorDriverStatus _driverStatus = SensorDriverStatus.Query();
@@ -50,19 +53,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private Task? _pollingTask;
     private long _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
     private TemperatureReading? _lastCpuReading;
-    private TemperatureReading? _lastGpuReading;
     private UtilizationReading? _lastCpuUsage;
-    private UtilizationReading? _lastGpuUsage;
     private string _cpuTemperature = "…";
-    private string _gpuTemperature = "…";
     private string _cpuUsage = "…";
-    private string _gpuUsage = "…";
     private string _cpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
-    private string _gpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
     private string _cpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
-    private string _gpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
+    private string _cpuDeviceName = string.Empty;
     private string _cpuSource = string.Empty;
-    private string _gpuSource = string.Empty;
     private string _statusMessage;
 
     /// <summary>
@@ -74,8 +71,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         _settingsService = settingsService;
         _startupService = startupService;
         _settings = settingsService.Load();
+        _settings.GpuTraySettings ??= new();
         _localizer = new Localizer(_settings.Language);
         _settings.Language = _localizer.Language;
+        _gpus = new ReadOnlyObservableCollection<GpuViewModel>(_gpuItems);
         _statusMessage = _localizer["WaitingForSensors"];
     }
 
@@ -101,30 +100,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 格式化後的 GPU 溫度顯示字串（例如 "55.0 °C"）。
-    /// </summary>
-    public string GpuTemperature
-    {
-        get => _gpuTemperature;
-        private set => SetField(ref _gpuTemperature, value);
-    }
-
-    /// <summary>
     /// 格式化後的 CPU 使用率顯示字串（例如 "12.5%"）。
     /// </summary>
     public string CpuUsage
     {
         get => _cpuUsage;
         private set => SetField(ref _cpuUsage, value);
-    }
-
-    /// <summary>
-    /// 格式化後的 GPU 使用率顯示字串（例如 "3.0%"）。
-    /// </summary>
-    public string GpuUsage
-    {
-        get => _gpuUsage;
-        private set => SetField(ref _gpuUsage, value);
     }
 
     /// <summary>
@@ -137,15 +118,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// GPU 系統匣圖示顯示的整數位元數字。
-    /// </summary>
-    public string GpuTrayDigits
-    {
-        get => _gpuTrayDigits;
-        private set => SetField(ref _gpuTrayDigits, value);
-    }
-
-    /// <summary>
     /// CPU 使用率系統匣圖示顯示的整數位元數字。
     /// </summary>
     public string CpuUsageTrayDigits
@@ -154,13 +126,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _cpuUsageTrayDigits, value);
     }
 
-    /// <summary>
-    /// GPU 使用率系統匣圖示顯示的整數位元數字。
-    /// </summary>
-    public string GpuUsageTrayDigits
+    public string CpuDeviceName
     {
-        get => _gpuUsageTrayDigits;
-        private set => SetField(ref _gpuUsageTrayDigits, value);
+        get => _cpuDeviceName;
+        private set => SetField(ref _cpuDeviceName, value);
     }
 
     /// <summary>
@@ -172,14 +141,47 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _cpuSource, value);
     }
 
-    /// <summary>
-    /// GPU 感測器來源名稱。
-    /// </summary>
-    public string GpuSource
+    public bool ShowCpuUsageInTray
     {
-        get => _gpuSource;
-        private set => SetField(ref _gpuSource, value);
+        get => _settings.ShowCpuUsageInTray;
+        set
+        {
+            if (_settings.ShowCpuUsageInTray == value)
+            {
+                return;
+            }
+
+            _settings.ShowCpuUsageInTray = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
     }
+
+    public bool ShowCpuTemperatureInTray
+    {
+        get => _settings.ShowCpuTemperatureInTray;
+        set
+        {
+            if (_settings.ShowCpuTemperatureInTray == value)
+            {
+                return;
+            }
+
+            _settings.ShowCpuTemperatureInTray = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 當前所有 GPU 的獨立顯示狀態。每個項目對應一張實體顯示卡。
+    /// </summary>
+    public ReadOnlyObservableCollection<GpuViewModel> Gpus => _gpus;
+
+    /// <summary>
+    /// 供 UI 測試與 ViewModel 內部同步使用的可變 GPU 集合。
+    /// </summary>
+    internal ObservableCollection<GpuViewModel> GpuItems => _gpuItems;
 
     /// <summary>
     /// 狀態欄訊息文字。
@@ -276,9 +278,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _settings.Language = _localizer.Language;
             SaveSettings();
             _lastCpuReading = null;
-            _lastGpuReading = null;
             _lastCpuUsage = null;
-            _lastGpuUsage = null;
+            foreach (var gpu in _gpuItems)
+            {
+                gpu.UpdateLabels(T["GpuUsage"], T["GpuTemperature"]);
+            }
             StatusMessage = T["WaitingForSensors"];
             OnPropertyChanged(string.Empty);
         }
@@ -439,15 +443,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _lastCpuReading = snapshot.CpuTemperature;
             CpuTemperature = Format(snapshot.CpuTemperature);
             CpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.CpuTemperature);
-            CpuSource = snapshot.CpuTemperature.Source;
-        }
-
-        if (_lastGpuReading != snapshot.GpuTemperature)
-        {
-            _lastGpuReading = snapshot.GpuTemperature;
-            GpuTemperature = Format(snapshot.GpuTemperature);
-            GpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.GpuTemperature);
-            GpuSource = snapshot.GpuTemperature.Source;
+            CpuDeviceName = snapshot.CpuTemperature.IsAvailable
+                ? snapshot.CpuTemperature.DeviceName
+                : snapshot.CpuUsage.DeviceName;
+            CpuSource = GetSensorName(snapshot.CpuTemperature.Source);
         }
 
         if (_lastCpuUsage != snapshot.CpuUsage)
@@ -455,25 +454,117 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _lastCpuUsage = snapshot.CpuUsage;
             CpuUsage = FormatUsage(snapshot.CpuUsage);
             CpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.CpuUsage);
+            if (!snapshot.CpuTemperature.IsAvailable)
+            {
+                CpuDeviceName = snapshot.CpuUsage.DeviceName;
+                CpuSource = GetSensorName(snapshot.CpuUsage.Source);
+            }
         }
 
-        if (_lastGpuUsage != snapshot.GpuUsage)
-        {
-            _lastGpuUsage = snapshot.GpuUsage;
-            GpuUsage = FormatUsage(snapshot.GpuUsage);
-            GpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.GpuUsage);
-        }
-
-        UpdateGpuPresence(snapshot.GpuTemperature, snapshot.GpuUsage);
+        ApplyGpuReadings(snapshot.Gpus);
+        UpdateGpuPresence(snapshot.Gpus);
         StatusMessage = GetAvailabilityMessage(snapshot);
+    }
+
+    /// <summary>
+    /// 將快照中的每張 GPU 同步至對應的 ViewModel，並移除已離開拓撲的裝置。
+    /// </summary>
+    private void ApplyGpuReadings(IReadOnlyList<GpuReading> readings)
+    {
+        for (var index = 0; index < readings.Count; index++)
+        {
+            var reading = readings[index];
+            var gpu = FindGpu(reading.Id);
+            if (gpu is null)
+            {
+                gpu = new GpuViewModel(reading.Id);
+                gpu.ConfigureTraySettings(GetGpuTraySettings(reading.Id), SaveSettings);
+                _gpuItems.Add(gpu);
+            }
+
+            gpu.Apply(
+                reading,
+                index,
+                T["GpuUsage"],
+                T["GpuTemperature"],
+                Format,
+                FormatUsage);
+        }
+
+        for (var index = _gpuItems.Count - 1; index >= 0; index--)
+        {
+            if (!ContainsGpu(readings, _gpuItems[index].Id))
+            {
+                _gpuItems.RemoveAt(index);
+            }
+        }
+    }
+
+    private TrayDisplaySettings GetGpuTraySettings(string id)
+    {
+        if (!_settings.GpuTraySettings.TryGetValue(id, out var settings) || settings is null)
+        {
+            settings = new TrayDisplaySettings();
+            _settings.GpuTraySettings[id] = settings;
+        }
+
+        return settings;
+    }
+
+    private static string GetSensorName(string source)
+    {
+        var separator = source.IndexOf('\u2022');
+        return separator >= 0 ? source[(separator + 1)..].Trim() : source;
+    }
+
+    /// <summary>
+    /// 依拓撲識別碼尋找既有 GPU ViewModel。
+    /// </summary>
+    private GpuViewModel? FindGpu(string id)
+    {
+        foreach (var gpu in _gpuItems)
+        {
+            if (string.Equals(gpu.Id, id, StringComparison.Ordinal))
+            {
+                return gpu;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 判斷最新快照是否仍包含指定 GPU。
+    /// </summary>
+    private static bool ContainsGpu(IReadOnlyList<GpuReading> readings, string id)
+    {
+        foreach (var reading in readings)
+        {
+            if (string.Equals(reading.Id, id, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// 依據 GPU 讀值動態判斷系統中是否配備可讀取的 GPU。
     /// </summary>
-    private void UpdateGpuPresence(TemperatureReading gpuTemperature, UtilizationReading gpuUsage)
+    private void UpdateGpuPresence(IReadOnlyList<GpuReading> readings)
     {
-        if (gpuTemperature.IsAvailable || gpuUsage.IsAvailable)
+        var anyGpuReading = false;
+        foreach (var reading in readings)
+        {
+            if (reading.IsAvailable)
+            {
+                anyGpuReading = true;
+                break;
+            }
+        }
+
+        if (anyGpuReading)
         {
             _gpuEverReported = true;
             _gpuMissingSamples = 0;
@@ -513,7 +604,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return T["DriverMissing"];
             }
 
-            return snapshot.GpuTemperature.IsAvailable || snapshot.GpuUsage.IsAvailable
+            return HasAvailableGpu(snapshot.Gpus)
                 ? T["CpuSensorUnavailable"]
                 : T["NoSensor"];
         }
@@ -529,12 +620,36 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return string.Empty;
         }
 
-        if (!snapshot.GpuTemperature.IsAvailable)
+        foreach (var gpu in snapshot.Gpus)
         {
-            return T["GpuSensorUnavailable"];
+            if (!gpu.Temperature.IsAvailable)
+            {
+                return T["GpuSensorUnavailable"];
+            }
+
+            if (!gpu.Usage.IsAvailable)
+            {
+                return T["GpuUsageUnavailable"];
+            }
         }
 
-        return snapshot.GpuUsage.IsAvailable ? string.Empty : T["GpuUsageUnavailable"];
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// 判斷快照中是否至少有一張 GPU 提供可信的即時讀值。
+    /// </summary>
+    private static bool HasAvailableGpu(IReadOnlyList<GpuReading> readings)
+    {
+        foreach (var reading in readings)
+        {
+            if (reading.IsAvailable)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private string Format(TemperatureReading reading) => reading.Celsius is decimal celsius

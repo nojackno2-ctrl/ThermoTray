@@ -3,12 +3,12 @@
 ; 1. 先執行自包含發行發布 (Self-contained Publish)：
 ;    dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -o .\publish\win-x64
 ; 2. 呼叫 ISCC 進行編譯：
-;    ISCC.exe /DAppVersion=1.1.4 .\installer\ThermoTray.iss
+;    ISCC.exe /DAppVersion=1.1.5 .\installer\ThermoTray.iss
 
 #define AppName "ThermoTray"
 ; 可由 CI 或命令列參數 /DAppVersion=<version> 覆蓋預設版本號
 #ifndef AppVersion
-  #define AppVersion "1.1.4"
+  #define AppVersion "1.1.5"
 #endif
 #define AppPublisher "ThermoTray"
 #define AppExeName "ThermoTray.exe"

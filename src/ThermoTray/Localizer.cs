@@ -26,6 +26,7 @@ public sealed class Localizer
             ["GpuTemperature"] = ("GPU 溫度", "GPU temperature"),
             ["CpuUsage"] = ("CPU 使用率", "CPU usage"),
             ["GpuUsage"] = ("GPU 使用率", "GPU usage"),
+            ["ShowInTray"] = ("顯示在工具列", "Show in tray"),
             ["Unavailable"] = ("無法取得", "Unavailable"),
             ["WaitingForSensors"] = ("正在讀取硬體感測器…", "Reading hardware sensors…"),
             ["NoSensor"] = ("找不到可用的溫度感測器。請確認硬體/驅動程式支援。", "No usable temperature sensor was found. Check hardware and driver support."),
