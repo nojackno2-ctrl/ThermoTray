@@ -9,24 +9,21 @@ using System.Threading;
 namespace ThermoTray;
 
 /// <summary>
-/// Owns the single-instance handles and answers later launches. Only one instance may poll the
-/// hardware and own the notification-area icons, so the guard is deliberately version independent;
-/// what the versions decide is which of the two instances gets to be that one.
+/// 負責管理單一執行體互斥鎖 (Mutex) 與跨實體通訊的協調器。
+/// 確保系統中同時只有一個 ThermoTray 實體持有系統匣圖示並輪詢硬體。
 /// </summary>
 internal sealed class InstanceCoordinator : IDisposable
 {
-    // Session-local names: every instance runs elevated in the same session, so a wider scope
-    // would only invite name collisions with other sessions.
+    // Session 範圍的互斥鎖名稱：所有實體均在相同 Session 內提升權限執行
     private const string OwnershipMutexName = "Local\\ThermoTray.SingleInstance";
 
     /// <summary>
-    /// Still created, and still honoured, because builds before the pipe existed know only this.
+    /// 舊版本 (1.1.3 之前) 使用的視窗顯示訊號事件名稱，保留用於向下相容。
     /// </summary>
     private const string LegacyShowWindowEventName = "Local\\ThermoTray.ShowWindow";
 
     /// <summary>
-    /// Read by the installer's <c>AppMutex</c>. It has to be machine wide and readable by an
-    /// unelevated process, because the installer runs at the lowest privilege level.
+    /// 供 Inno Setup 安裝程式讀取的全域互斥鎖名稱。安裝程式以一般權限執行，透過此鎖判斷 ThermoTray 是否正在執行。
     /// </summary>
     internal const string SetupMutexName = "Global\\ThermoTray.Setup";
 
@@ -42,13 +39,18 @@ internal sealed class InstanceCoordinator : IDisposable
 
     private InstanceCoordinator(Mutex? ownership) => _ownership = ownership;
 
-    /// <summary>Named per session because a pipe name, unlike a <c>Local\</c> object, is machine wide.</summary>
+    /// <summary>
+    /// 依據 Session ID 產生的管道名稱。
+    /// </summary>
     internal static string PipeName { get; } = BuildPipeName();
 
     /// <summary>
-    /// Returns the coordinator when this process may own the tray, or <see langword="null"/> when
-    /// another instance already does.
+    /// 嘗試取得系統匣單一執行體的持有權。
     /// </summary>
+    /// <param name="version">當前實體的版本號。</param>
+    /// <param name="showWindow">顯示主視窗的回調委派。</param>
+    /// <param name="requestExit">請求結束程式的回調委派。</param>
+    /// <returns>若成功取得持有權傳回 <see cref="InstanceCoordinator"/> 實例，否則傳回 null。</returns>
     internal static InstanceCoordinator? TryClaim(Version? version, Action showWindow, Action requestExit)
     {
         Mutex? ownership;
@@ -66,7 +68,6 @@ internal sealed class InstanceCoordinator : IDisposable
             or IOException
             or WaitHandleCannotBeOpenedException)
         {
-            // Without the guard a duplicate instance becomes possible, which beats refusing to start.
             ownership = null;
         }
 
@@ -76,9 +77,7 @@ internal sealed class InstanceCoordinator : IDisposable
     }
 
     /// <summary>
-    /// Claims ownership after the previous instance was asked to exit. The name survives for a
-    /// moment after the process object signals, so a single attempt would lose a race it has
-    /// already won.
+    /// 在要求前一個實體退出後，帶重試機制地嘗試重新取得持有權。
     /// </summary>
     internal static InstanceCoordinator? ClaimAfterHandover(Version? version, Action showWindow, Action requestExit)
     {
@@ -97,9 +96,9 @@ internal sealed class InstanceCoordinator : IDisposable
     }
 
     /// <summary>
-    /// Last resort for an instance that cannot be reached over the pipe, which means it predates it.
-    /// Reports whether the running instance was actually told to show itself.
+    /// 當無法透過具名管道連接時，嘗試發送舊版 EventWaitHandle 訊號要求對方顯示視窗。
     /// </summary>
+    /// <returns>若成功發送訊號傳回 true，否則傳回 false。</returns>
     internal static bool TrySignalLegacyInstance()
     {
         try
@@ -124,6 +123,9 @@ internal sealed class InstanceCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// 等待指定處理程序 exit 結束。
+    /// </summary>
     internal static bool WaitForProcessExit(int processId, TimeSpan timeout)
     {
         try
@@ -133,11 +135,14 @@ internal sealed class InstanceCoordinator : IDisposable
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            // The process is already gone, which is exactly what the caller was waiting for.
+            // 處理程序已不存在，視為已順利退出
             return true;
         }
     }
 
+    /// <summary>
+    /// 釋放所有控制代碼與管道伺服器。
+    /// </summary>
     public void Dispose()
     {
         _server?.Dispose();
@@ -154,6 +159,9 @@ internal sealed class InstanceCoordinator : IDisposable
         _ownership = null;
     }
 
+    /// <summary>
+    /// 啟動通訊伺服器與舊版訊號監聽。
+    /// </summary>
     private void Start(Version? version, Action showWindow, Action requestExit)
     {
         _setupMutex = TryCreateSetupMutex();
@@ -163,7 +171,9 @@ internal sealed class InstanceCoordinator : IDisposable
         _server.Start();
     }
 
-    /// <summary>Lets a launch that speaks the older protocol bring this instance's window back.</summary>
+    /// <summary>
+    /// 註冊舊版訊號觸發監聽。
+    /// </summary>
     private void RegisterLegacySignal(Action showWindow)
     {
         try
@@ -180,14 +190,11 @@ internal sealed class InstanceCoordinator : IDisposable
             or IOException
             or WaitHandleCannotBeOpenedException)
         {
-            // Single-instance enforcement still works; only the older hand-over gesture is lost.
         }
     }
 
     /// <summary>
-    /// Exists only to be seen. The installer opens it with SYNCHRONIZE to find out whether ThermoTray
-    /// is running, which it cannot learn any other way: it runs unelevated and so can neither read
-    /// this process nor replace the executable image while it is loaded.
+    /// 建立供 Inno Setup 探測的全域互斥鎖，賦予 Everyone 讀取與 SYNCHRONIZE 權限。
     /// </summary>
     private static Mutex? TryCreateSetupMutex()
     {
@@ -200,8 +207,6 @@ internal sealed class InstanceCoordinator : IDisposable
                 security.AddAccessRule(new MutexAccessRule(identity.User, MutexRights.FullControl, AccessControlType.Allow));
             }
 
-            // Read-only for everyone else: an unelevated installer must be able to see it, and
-            // SYNCHRONIZE is all it needs. Mandatory integrity policy blocks writing up, not reading.
             security.AddAccessRule(new MutexAccessRule(
                 new SecurityIdentifier(WellKnownSidType.WorldSid, domainSid: null),
                 MutexRights.Synchronize | MutexRights.ReadPermissions,
@@ -214,11 +219,13 @@ internal sealed class InstanceCoordinator : IDisposable
             or WaitHandleCannotBeOpenedException
             or PlatformNotSupportedException)
         {
-            // The installer then falls back to its own files-in-use handling; monitoring is unaffected.
             return null;
         }
     }
 
+    /// <summary>
+    /// 依據 Process SessionId 建立管道名稱。
+    /// </summary>
     private static string BuildPipeName()
     {
         try
@@ -234,8 +241,7 @@ internal sealed class InstanceCoordinator : IDisposable
 }
 
 /// <summary>
-/// Answers later launches on behalf of the instance that owns the tray. One client at a time is
-/// enough: a launch asks who is running and then either hands over or asks this instance to exit.
+/// 具名管道伺服器，負責監聽後續啟動的 ThermoTray 傳來的命令與版本查詢。
 /// </summary>
 internal sealed class InstanceServer : IDisposable
 {
@@ -269,13 +275,15 @@ internal sealed class InstanceServer : IDisposable
         }
         catch (AggregateException)
         {
-            // The listener only ever fails on a broken client, which no longer matters here.
         }
 
         _listener = null;
         _cancellation.Dispose();
     }
 
+    /// <summary>
+    /// 非同步持續監聽管道連線。
+    /// </summary>
     private async Task ListenAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -300,11 +308,13 @@ internal sealed class InstanceServer : IDisposable
                 or UnauthorizedAccessException
                 or ObjectDisposedException)
             {
-                // One client that disconnects mid-exchange must not stop the next launch being answered.
             }
         }
     }
 
+    /// <summary>
+    /// 處理單次管道連線中的命令（WHO / SHOW / EXIT）。
+    /// </summary>
     private async Task ServeAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(pipe, InstanceWire.Encoding, detectEncodingFromByteOrderMarks: false, BufferSize, leaveOpen: true);
@@ -332,38 +342,36 @@ internal sealed class InstanceServer : IDisposable
                     return;
 
                 case InstanceProtocol.ExitRequest:
-                    // Acknowledged before shutting down, or the caller could not tell a refusal from a
-                    // crash. The callback must not run inline, or shutdown would wait on this loop.
                     await AcknowledgeAsync(writer, pipe, cancellationToken).ConfigureAwait(false);
                     _requestExit();
                     return;
 
                 default:
-                    // Includes null, which is a disconnected client, and anything that is not ours.
                     return;
             }
         }
     }
 
+    /// <summary>
+    /// 回應 OK 確認訊息並排空管道。
+    /// </summary>
     private static async Task AcknowledgeAsync(StreamWriter writer, NamedPipeServerStream pipe, CancellationToken cancellationToken)
     {
         await writer.WriteLineAsync(InstanceProtocol.Acknowledgement.AsMemory(), cancellationToken).ConfigureAwait(false);
 
         try
         {
-            // Closing the pipe can discard what the client has not read yet, and on the exit path
-            // this process is about to disappear.
             pipe.WaitForPipeDrain();
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
-            // The client left without reading; nothing more can be delivered to it.
         }
     }
 }
 
-/// <summary>The launching side of the same exchange. Every call is synchronous by design: it runs
-/// during startup, before there is a window or a message loop to keep responsive.</summary>
+/// <summary>
+/// 新啟動實體發起管道連線的用戶端。
+/// </summary>
 internal sealed class InstanceClient : IDisposable
 {
     private static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(5);
@@ -390,8 +398,7 @@ internal sealed class InstanceClient : IDisposable
     internal int RunningProcessId { get; private set; }
 
     /// <summary>
-    /// Returns a connected client that has already identified its peer, or <see langword="null"/>
-    /// when nothing on the other end speaks this protocol.
+    /// 嘗試連接正在執行的管道伺服器。
     /// </summary>
     internal static InstanceClient? TryConnect(string pipeName, TimeSpan timeout)
     {
@@ -418,8 +425,14 @@ internal sealed class InstanceClient : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// 發送 SHOW 命令。
+    /// </summary>
     internal bool RequestShow() => Exchange(InstanceProtocol.ShowRequest) == InstanceProtocol.Acknowledgement;
 
+    /// <summary>
+    /// 發送 EXIT 命令。
+    /// </summary>
     internal bool RequestExit() => Exchange(InstanceProtocol.ExitRequest) == InstanceProtocol.Acknowledgement;
 
     public void Dispose()
@@ -435,6 +448,9 @@ internal sealed class InstanceClient : IDisposable
         _pipe.Dispose();
     }
 
+    /// <summary>
+    /// 發送 WHO 命令查詢對方版本號與 PID。
+    /// </summary>
     private bool TryIdentify()
     {
         if (!InstanceProtocol.TryParseIdentity(Exchange(InstanceProtocol.IdentifyRequest), out var version, out var processId))
@@ -447,6 +463,9 @@ internal sealed class InstanceClient : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// 發送管道請求並接收單行回應。
+    /// </summary>
     private string? Exchange(string request)
     {
         try
@@ -471,8 +490,7 @@ internal sealed class InstanceClient : IDisposable
         or OperationCanceledException;
 
     /// <summary>
-    /// Runs the exchange off the calling thread. Blocking the UI thread on a continuation that the
-    /// dispatcher would have to run is a deadlock, and startup does block on these calls.
+    /// 在背景 ThreadPool 執行非同步工作並同步等待，防止 UI 執行緒死鎖。
     /// </summary>
     private static void RunSync(Func<Task> operation) =>
         Task.Run(() => operation().WaitAsync(ExchangeTimeout)).GetAwaiter().GetResult();
@@ -481,9 +499,14 @@ internal sealed class InstanceClient : IDisposable
         Task.Run(() => operation().WaitAsync(ExchangeTimeout)).GetAwaiter().GetResult();
 }
 
+/// <summary>
+/// 具名管道編碼與換行格式常數。
+/// </summary>
 internal static class InstanceWire
 {
-    /// <summary>Without the explicit constructor <see cref="StreamWriter"/> emits a byte order mark.</summary>
+    /// <summary>
+    /// 使用無 BOM 標記的 UTF-8 編碼。
+    /// </summary>
     internal static Encoding Encoding { get; } = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     internal const string NewLine = "\n";

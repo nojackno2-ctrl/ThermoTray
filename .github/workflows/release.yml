@@ -32,12 +32,31 @@ jobs:
           "AppVersion=$version" >> $env:GITHUB_ENV
           "ReleaseTag=$tag" >> $env:GITHUB_ENV
 
-      - run: dotnet restore ThermoTray.sln
+      # Restore with the publish RID so build, test and publish share one assets graph.
+      - run: dotnet restore ThermoTray.sln --runtime win-x64
       - run: dotnet build ThermoTray.sln --configuration Release --no-restore
-      - run: dotnet test ThermoTray.sln --configuration Release --no-build
+      - run: dotnet test ThermoTray.sln --configuration Release --no-build --no-restore
       - run: dotnet format ThermoTray.sln --verify-no-changes --no-restore --verbosity minimal
 
-      - run: dotnet publish src/ThermoTray/ThermoTray.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output publish/win-x64
+      - run: dotnet publish src/ThermoTray/ThermoTray.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --no-restore --output publish/win-x64
+
+      - name: Verify embedded administrator manifest
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter mt.exe -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $mt) { throw 'Windows SDK Manifest Tool (mt.exe) was not found' }
+
+          New-Item -ItemType Directory -Force -Path artifacts/verification | Out-Null
+          & $mt.FullName '-inputresource:publish/win-x64/ThermoTray.exe;#1' '-out:artifacts/verification/manifest.xml'
+          if ($LASTEXITCODE -ne 0) { throw "mt.exe failed with exit code $LASTEXITCODE" }
+
+          $manifest = Get-Content artifacts/verification/manifest.xml -Raw
+          if ($manifest -notmatch 'requestedExecutionLevel\s+level="requireAdministrator"') {
+            throw 'The published executable does not require administrator elevation'
+          }
+
       - run: choco install innosetup --no-progress --yes
       - run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:AppVersion installer\ThermoTray.iss'
         shell: pwsh
@@ -46,9 +65,25 @@ jobs:
       - name: Build the portable archive
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $files = Get-ChildItem publish/win-x64 -Exclude *.pdb
-          Compress-Archive -Path $files -DestinationPath "artifacts/ThermoTray-$env:AppVersion-win-x64-portable.zip" -Force
+          $releaseDir = Join-Path $PWD 'artifacts/release'
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          $files = Get-ChildItem publish/win-x64 -File | Where-Object Extension -ne '.pdb'
+          $zipPath = Join-Path $releaseDir "ThermoTray-$env:AppVersion-win-x64-portable.zip"
+          Compress-Archive -Path $files -DestinationPath $zipPath -CompressionLevel Optimal -Force
+
+          $installerPath = "artifacts/installer/ThermoTray-Setup-$env:AppVersion.exe"
+          if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw "Installer was not created: $installerPath"
+          }
+          Copy-Item -LiteralPath $installerPath -Destination $releaseDir
+
+          $checksums = Get-ChildItem $releaseDir -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+              "$hash  $($_.Name)"
+            }
+          $checksums | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding utf8
 
       # Creates the tag at this commit when it does not exist yet, which is what makes a manual run a
       # complete release path rather than something that has to be tagged first.
@@ -58,8 +93,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create $env:ReleaseTag `
-            "artifacts/installer/ThermoTray-Setup-$env:AppVersion.exe" `
-            "artifacts/ThermoTray-$env:AppVersion-win-x64-portable.zip" `
+            "artifacts/release/ThermoTray-Setup-$env:AppVersion.exe" `
+            "artifacts/release/ThermoTray-$env:AppVersion-win-x64-portable.zip" `
+            "artifacts/release/SHA256SUMS.txt" `
             --target $env:GITHUB_SHA `
             --title "ThermoTray $env:AppVersion" `
             --generate-notes

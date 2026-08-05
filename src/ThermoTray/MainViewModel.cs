@@ -1,25 +1,34 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 
 namespace ThermoTray;
 
+/// <summary>
+/// 主視窗與系統匣圖示的主要 View Model (MVVM 架構)。
+/// 負責感測器定期輪詢、視窗顯示與隱藏狀態切換、開機啟動設定同步及多語系處理。
+/// </summary>
 public sealed class MainViewModel : INotifyPropertyChanged
 {
+    /// <summary>
+    /// 當主視窗顯示時的採樣週期（1 秒）。
+    /// </summary>
     private static readonly TimeSpan VisiblePollingInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Used while the window is hidden in the tray, which is where this app spends nearly all of its
-    /// life. Only the tray icons are readable then, and reading hardware sensors is by far the most
-    /// expensive thing ThermoTray does, so halving the sample rate halves its idle CPU cost.
+    /// 當主視窗隱藏至系統匣時的採樣週期（2 秒）。
+    /// 在背景執行時降低採樣頻率可有效減半 CPU 與系統資源開銷。
     /// </summary>
     private static readonly TimeSpan HiddenPollingInterval = TimeSpan.FromSeconds(2);
 
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
     private const long DriverProbeIntervalMilliseconds = 30_000;
 
-    /// <summary>Samples a missing GPU is given before it is treated as absent rather than faulty.</summary>
+    /// <summary>
+    /// 判定 GPU 確實不存在前允許的連續無讀值次數（緩衝次數）。
+    /// </summary>
     private const int MissingGpuGraceSamples = 5;
 
     private readonly HardwareSensorService _sensorService;
@@ -27,125 +36,165 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly StartupService _startupService;
     private readonly AppSettings _settings;
     private readonly Localizer _localizer;
+    private readonly ObservableCollection<GpuViewModel> _gpuItems = [];
+    private readonly ReadOnlyObservableCollection<GpuViewModel> _gpus;
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
+    private readonly object _startupGate = new();
     private SensorDriverStatus _driverStatus = SensorDriverStatus.Query();
     private bool _isDriverActionVisible;
     private bool _isGpuPresent = true;
     private bool _gpuEverReported;
     private int _gpuMissingSamples;
     private bool _isStopped;
+    private int _startupRequestVersion;
 
-    // Read by the sampling thread and written by the UI thread, so it must not be cached in a register.
     private volatile bool _isWindowVisible;
     private CancellationTokenSource? _pollingCancellation;
     private Task? _pollingTask;
     private long _nextDriverProbeTick = Environment.TickCount64 + DriverProbeIntervalMilliseconds;
     private TemperatureReading? _lastCpuReading;
-    private TemperatureReading? _lastGpuReading;
     private UtilizationReading? _lastCpuUsage;
-    private UtilizationReading? _lastGpuUsage;
     private string _cpuTemperature = "…";
-    private string _gpuTemperature = "…";
     private string _cpuUsage = "…";
-    private string _gpuUsage = "…";
     private string _cpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
-    private string _gpuTrayDigits = TemperatureFormatter.TrayPlaceholder;
     private string _cpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
-    private string _gpuUsageTrayDigits = UtilizationFormatter.TrayPlaceholder;
+    private string _cpuDeviceName = string.Empty;
     private string _cpuSource = string.Empty;
-    private string _gpuSource = string.Empty;
     private string _statusMessage;
 
+    /// <summary>
+    /// 初始化 MainViewModel 的新實例。
+    /// </summary>
     public MainViewModel(HardwareSensorService sensorService, SettingsService settingsService, StartupService startupService)
     {
         _sensorService = sensorService;
         _settingsService = settingsService;
         _startupService = startupService;
         _settings = settingsService.Load();
+        _settings.GpuTraySettings ??= new();
         _localizer = new Localizer(_settings.Language);
         _settings.Language = _localizer.Language;
+        _gpus = new ReadOnlyObservableCollection<GpuViewModel>(_gpuItems);
         _statusMessage = _localizer["WaitingForSensors"];
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    /// <summary>
+    /// 本地化服務實例。
+    /// </summary>
     public Localizer T => _localizer;
 
     /// <summary>
-    /// The product version as a user reads it. Neither underlying value is shown verbatim: the assembly
-    /// version's fourth component is always zero, and the informational version carries the commit hash.
+    /// 格式化後顯示於視窗標題列的產品版本號字串 (如 "v1.1.3")。
     /// </summary>
     public string Version { get; } = FormatVersion(typeof(MainViewModel).Assembly.GetName().Version);
 
+    /// <summary>
+    /// 格式化後的 CPU 溫度顯示字串（例如 "45.2 °C"）。
+    /// </summary>
     public string CpuTemperature
     {
         get => _cpuTemperature;
         private set => SetField(ref _cpuTemperature, value);
     }
 
-    public string GpuTemperature
-    {
-        get => _gpuTemperature;
-        private set => SetField(ref _gpuTemperature, value);
-    }
-
+    /// <summary>
+    /// 格式化後的 CPU 使用率顯示字串（例如 "12.5%"）。
+    /// </summary>
     public string CpuUsage
     {
         get => _cpuUsage;
         private set => SetField(ref _cpuUsage, value);
     }
 
-    public string GpuUsage
-    {
-        get => _gpuUsage;
-        private set => SetField(ref _gpuUsage, value);
-    }
-
-    /// <summary>Whole degrees for the tray icon, independent of the current culture's number format.</summary>
+    /// <summary>
+    /// CPU 系統匣圖示顯示的整數位元數字。
+    /// </summary>
     public string CpuTrayDigits
     {
         get => _cpuTrayDigits;
         private set => SetField(ref _cpuTrayDigits, value);
     }
 
-    public string GpuTrayDigits
-    {
-        get => _gpuTrayDigits;
-        private set => SetField(ref _gpuTrayDigits, value);
-    }
-
-    /// <summary>Whole percentage points for the tray icon, independent of the current culture.</summary>
+    /// <summary>
+    /// CPU 使用率系統匣圖示顯示的整數位元數字。
+    /// </summary>
     public string CpuUsageTrayDigits
     {
         get => _cpuUsageTrayDigits;
         private set => SetField(ref _cpuUsageTrayDigits, value);
     }
 
-    public string GpuUsageTrayDigits
+    public string CpuDeviceName
     {
-        get => _gpuUsageTrayDigits;
-        private set => SetField(ref _gpuUsageTrayDigits, value);
+        get => _cpuDeviceName;
+        private set => SetField(ref _cpuDeviceName, value);
     }
 
+    /// <summary>
+    /// CPU 感測器來源名稱。
+    /// </summary>
     public string CpuSource
     {
         get => _cpuSource;
         private set => SetField(ref _cpuSource, value);
     }
 
-    public string GpuSource
+    public bool ShowCpuUsageInTray
     {
-        get => _gpuSource;
-        private set => SetField(ref _gpuSource, value);
+        get => _settings.ShowCpuUsageInTray;
+        set
+        {
+            if (_settings.ShowCpuUsageInTray == value)
+            {
+                return;
+            }
+
+            _settings.ShowCpuUsageInTray = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
     }
 
+    public bool ShowCpuTemperatureInTray
+    {
+        get => _settings.ShowCpuTemperatureInTray;
+        set
+        {
+            if (_settings.ShowCpuTemperatureInTray == value)
+            {
+                return;
+            }
+
+            _settings.ShowCpuTemperatureInTray = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 當前所有 GPU 的獨立顯示狀態。每個項目對應一張實體顯示卡。
+    /// </summary>
+    public ReadOnlyObservableCollection<GpuViewModel> Gpus => _gpus;
+
+    /// <summary>
+    /// 供 UI 測試與 ViewModel 內部同步使用的可變 GPU 集合。
+    /// </summary>
+    internal ObservableCollection<GpuViewModel> GpuItems => _gpuItems;
+
+    /// <summary>
+    /// 狀態欄訊息文字。
+    /// </summary>
     public string StatusMessage
     {
         get => _statusMessage;
         private set => SetField(ref _statusMessage, value);
     }
 
-    /// <summary>True when the missing kernel driver is the reason a reading is unavailable.</summary>
+    /// <summary>
+    /// 是否顯示 PawnIO 驅動程式下載與提醒提示按鈕。
+    /// </summary>
     public bool IsDriverActionVisible
     {
         get => _isDriverActionVisible;
@@ -153,9 +202,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// False once this machine has gone long enough without a single GPU temperature or usage
-    /// reading to conclude that it has no readable GPU telemetry. Its tray icon and card are then
-    /// hidden instead of showing a warning that can never be resolved.
+    /// 取得一個值，表示當前系統是否存在可讀取的 GPU。若經過多次採樣均無 GPU 感測器，則隱藏 GPU 圖示。
     /// </summary>
     public bool IsGpuPresent
     {
@@ -163,8 +210,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _isGpuPresent, value);
     }
 
+    /// <summary>
+    /// PawnIO 驅動程式下載連結。
+    /// </summary>
     public string DriverDownloadUrl => SensorDriverStatus.DownloadUrl;
 
+    /// <summary>
+    /// 取得或設定是否隨 Windows 啟動。
+    /// </summary>
     public bool StartWithWindows
     {
         get => _settings.StartWithWindows;
@@ -175,11 +228,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
+            Interlocked.Increment(ref _startupRequestVersion);
             if (!TrySetStartupEnabled(value))
             {
                 StatusMessage = T["StartupError"];
-
-                // Push the unchanged value back so the checkbox does not claim a state that was not applied.
                 OnPropertyChanged();
                 return;
             }
@@ -190,6 +242,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// 取得或設定關閉主視窗時是否縮小至系統匣。
+    /// </summary>
     public bool HideWhenClosed
     {
         get => _settings.HideWhenClosed;
@@ -206,6 +261,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// 取得或設定當前介面語言。
+    /// </summary>
     public string Language
     {
         get => _localizer.Language;
@@ -220,14 +278,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _settings.Language = _localizer.Language;
             SaveSettings();
             _lastCpuReading = null;
-            _lastGpuReading = null;
             _lastCpuUsage = null;
-            _lastGpuUsage = null;
+            foreach (var gpu in _gpuItems)
+            {
+                gpu.UpdateLabels(T["GpuUsage"], T["GpuTemperature"]);
+            }
             StatusMessage = T["WaitingForSensors"];
             OnPropertyChanged(string.Empty);
         }
     }
 
+    /// <summary>
+    /// 啟動感測器背景輪詢與開機啟動設定校驗。
+    /// </summary>
     public void Start()
     {
         if (_isStopped || _pollingCancellation is not null)
@@ -238,20 +301,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var cancellation = new CancellationTokenSource();
         _pollingCancellation = cancellation;
 
-        // The whole loop runs on the thread pool, so a sample never needs its own dispatch back onto it.
         _pollingTask = Task.Run(() => PollAsync(cancellation.Token), CancellationToken.None);
-
-        // schtasks can block for seconds, so the startup preference is reconciled off the UI thread.
         _ = Task.Run(ReconcileStartupSetting);
     }
 
     /// <summary>
-    /// Tells the sampling loop whether anything other than the tray icons is on screen. The new rate
-    /// takes effect on the next tick rather than immediately, which keeps the loop free of extra
-    /// cross-thread signalling for a change worth at most one interval.
+    /// 設定當前主視窗是否顯示，據此動態調整輪詢頻率（顯示時 1s，隱藏至系統匣時 2s）。
     /// </summary>
     public void SetWindowVisible(bool isVisible) => _isWindowVisible = isVisible;
 
+    /// <summary>
+    /// 停止輪詢並處置感測器服務。
+    /// </summary>
     public void Stop()
     {
         _isStopped = true;
@@ -270,8 +331,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (!WaitForPollingToStop(pollingTask))
         {
-            // A sampling pass is still running; closing the sensor stack underneath it would be worse
-            // than leaving it to process teardown.
             return;
         }
 
@@ -279,6 +338,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         _sensorService.Dispose();
     }
 
+    /// <summary>
+    /// 等待輪詢工作退出。
+    /// </summary>
     private static bool WaitForPollingToStop(Task? pollingTask)
     {
         if (pollingTask is null)
@@ -292,11 +354,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (AggregateException)
         {
-            // A faulted polling task has still finished, which is all this wait needs to establish.
             return true;
         }
     }
 
+    /// <summary>
+    /// 背景輪詢迴圈，依指定頻率呼叫感測器服務並更新 UI。
+    /// </summary>
     private async Task PollAsync(CancellationToken cancellationToken)
     {
         var interval = CurrentPollingInterval;
@@ -332,26 +396,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Normal shutdown.
         }
     }
 
     private TimeSpan CurrentPollingInterval => GetPollingInterval(_isWindowVisible);
 
     /// <summary>
-    /// Three components, because that is what <c>Directory.Build.props</c> sets and what every release
-    /// and installer is named after. An absent component reads as zero rather than as <c>-1</c>.
+    /// 將 Version 物件格式化為 "v1.1.3" 格式字串。
     /// </summary>
     internal static string FormatVersion(Version? version) => version is null
         ? string.Empty
         : $"v{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
 
+    /// <summary>
+    /// 依據視窗顯示狀態取得採樣間隔（可測試函數）。
+    /// </summary>
     internal static TimeSpan GetPollingInterval(bool isWindowVisible) =>
         isWindowVisible ? VisiblePollingInterval : HiddenPollingInterval;
 
     /// <summary>
-    /// Queues UI work without awaiting it. Awaiting would make the polling loop depend on the UI
-    /// thread, which then could not block on that loop during shutdown.
+    /// 非同步分派 UI 委派動作至 Dispatcher。
     /// </summary>
     private void Post(Action action)
     {
@@ -366,10 +430,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (InvalidOperationException)
         {
-            // The dispatcher shut down after the check above; the update is no longer needed.
         }
     }
 
+    /// <summary>
+    /// 將讀取到的硬體快照套用至各 View Model 屬性與系統匣字串。
+    /// </summary>
     private void ApplySnapshot(HardwareSnapshot snapshot)
     {
         if (_lastCpuReading != snapshot.CpuTemperature)
@@ -377,15 +443,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _lastCpuReading = snapshot.CpuTemperature;
             CpuTemperature = Format(snapshot.CpuTemperature);
             CpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.CpuTemperature);
-            CpuSource = snapshot.CpuTemperature.Source;
-        }
-
-        if (_lastGpuReading != snapshot.GpuTemperature)
-        {
-            _lastGpuReading = snapshot.GpuTemperature;
-            GpuTemperature = Format(snapshot.GpuTemperature);
-            GpuTrayDigits = TemperatureFormatter.ToTrayDigits(snapshot.GpuTemperature);
-            GpuSource = snapshot.GpuTemperature.Source;
+            CpuDeviceName = snapshot.CpuTemperature.IsAvailable
+                ? snapshot.CpuTemperature.DeviceName
+                : snapshot.CpuUsage.DeviceName;
+            CpuSource = GetSensorName(snapshot.CpuTemperature.Source);
         }
 
         if (_lastCpuUsage != snapshot.CpuUsage)
@@ -393,22 +454,117 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _lastCpuUsage = snapshot.CpuUsage;
             CpuUsage = FormatUsage(snapshot.CpuUsage);
             CpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.CpuUsage);
+            if (!snapshot.CpuTemperature.IsAvailable)
+            {
+                CpuDeviceName = snapshot.CpuUsage.DeviceName;
+                CpuSource = GetSensorName(snapshot.CpuUsage.Source);
+            }
         }
 
-        if (_lastGpuUsage != snapshot.GpuUsage)
-        {
-            _lastGpuUsage = snapshot.GpuUsage;
-            GpuUsage = FormatUsage(snapshot.GpuUsage);
-            GpuUsageTrayDigits = UtilizationFormatter.ToTrayDigits(snapshot.GpuUsage);
-        }
-
-        UpdateGpuPresence(snapshot.GpuTemperature, snapshot.GpuUsage);
+        ApplyGpuReadings(snapshot.Gpus);
+        UpdateGpuPresence(snapshot.Gpus);
         StatusMessage = GetAvailabilityMessage(snapshot);
     }
 
-    private void UpdateGpuPresence(TemperatureReading gpuTemperature, UtilizationReading gpuUsage)
+    /// <summary>
+    /// 將快照中的每張 GPU 同步至對應的 ViewModel，並移除已離開拓撲的裝置。
+    /// </summary>
+    private void ApplyGpuReadings(IReadOnlyList<GpuReading> readings)
     {
-        if (gpuTemperature.IsAvailable || gpuUsage.IsAvailable)
+        for (var index = 0; index < readings.Count; index++)
+        {
+            var reading = readings[index];
+            var gpu = FindGpu(reading.Id);
+            if (gpu is null)
+            {
+                gpu = new GpuViewModel(reading.Id);
+                gpu.ConfigureTraySettings(GetGpuTraySettings(reading.Id), SaveSettings);
+                _gpuItems.Add(gpu);
+            }
+
+            gpu.Apply(
+                reading,
+                index,
+                T["GpuUsage"],
+                T["GpuTemperature"],
+                Format,
+                FormatUsage);
+        }
+
+        for (var index = _gpuItems.Count - 1; index >= 0; index--)
+        {
+            if (!ContainsGpu(readings, _gpuItems[index].Id))
+            {
+                _gpuItems.RemoveAt(index);
+            }
+        }
+    }
+
+    private TrayDisplaySettings GetGpuTraySettings(string id)
+    {
+        if (!_settings.GpuTraySettings.TryGetValue(id, out var settings) || settings is null)
+        {
+            settings = new TrayDisplaySettings();
+            _settings.GpuTraySettings[id] = settings;
+        }
+
+        return settings;
+    }
+
+    private static string GetSensorName(string source)
+    {
+        var separator = source.IndexOf('\u2022');
+        return separator >= 0 ? source[(separator + 1)..].Trim() : source;
+    }
+
+    /// <summary>
+    /// 依拓撲識別碼尋找既有 GPU ViewModel。
+    /// </summary>
+    private GpuViewModel? FindGpu(string id)
+    {
+        foreach (var gpu in _gpuItems)
+        {
+            if (string.Equals(gpu.Id, id, StringComparison.Ordinal))
+            {
+                return gpu;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 判斷最新快照是否仍包含指定 GPU。
+    /// </summary>
+    private static bool ContainsGpu(IReadOnlyList<GpuReading> readings, string id)
+    {
+        foreach (var reading in readings)
+        {
+            if (string.Equals(reading.Id, id, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 依據 GPU 讀值動態判斷系統中是否配備可讀取的 GPU。
+    /// </summary>
+    private void UpdateGpuPresence(IReadOnlyList<GpuReading> readings)
+    {
+        var anyGpuReading = false;
+        foreach (var reading in readings)
+        {
+            if (reading.IsAvailable)
+            {
+                anyGpuReading = true;
+                break;
+            }
+        }
+
+        if (anyGpuReading)
         {
             _gpuEverReported = true;
             _gpuMissingSamples = 0;
@@ -418,7 +574,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (_gpuEverReported)
         {
-            // A GPU that reported once and then stopped is a real fault, so keep surfacing it.
             return;
         }
 
@@ -430,11 +585,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         IsGpuPresent = _gpuMissingSamples < MissingGpuGraceSamples;
     }
 
+    /// <summary>
+    /// 依據硬體快照回報適當狀態與錯誤提醒訊息。
+    /// </summary>
     private string GetAvailabilityMessage(HardwareSnapshot snapshot)
     {
         if (!snapshot.CpuTemperature.IsAvailable)
         {
-            // The driver can be installed while ThermoTray runs, so re-probe instead of trusting the startup value.
             if (!_driverStatus.IsInstalled && Environment.TickCount64 >= _nextDriverProbeTick)
             {
                 _driverStatus = SensorDriverStatus.Query();
@@ -447,7 +604,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return T["DriverMissing"];
             }
 
-            return snapshot.GpuTemperature.IsAvailable || snapshot.GpuUsage.IsAvailable
+            return HasAvailableGpu(snapshot.Gpus)
                 ? T["CpuSensorUnavailable"]
                 : T["NoSensor"];
         }
@@ -458,18 +615,41 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return T["CpuUsageUnavailable"];
         }
 
-        // A machine with no readable GPU telemetry is not a fault and must not raise a permanent warning.
         if (!IsGpuPresent)
         {
             return string.Empty;
         }
 
-        if (!snapshot.GpuTemperature.IsAvailable)
+        foreach (var gpu in snapshot.Gpus)
         {
-            return T["GpuSensorUnavailable"];
+            if (!gpu.Temperature.IsAvailable)
+            {
+                return T["GpuSensorUnavailable"];
+            }
+
+            if (!gpu.Usage.IsAvailable)
+            {
+                return T["GpuUsageUnavailable"];
+            }
         }
 
-        return snapshot.GpuUsage.IsAvailable ? string.Empty : T["GpuUsageUnavailable"];
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// 判斷快照中是否至少有一張 GPU 提供可信的即時讀值。
+    /// </summary>
+    private static bool HasAvailableGpu(IReadOnlyList<GpuReading> readings)
+    {
+        foreach (var reading in readings)
+        {
+            if (reading.IsAvailable)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private string Format(TemperatureReading reading) => reading.Celsius is decimal celsius
@@ -488,11 +668,75 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // Preferences are non-critical; avoid a user-visible crash if a local profile is locked.
         }
     }
 
     private bool TrySetStartupEnabled(bool enabled)
+    {
+        lock (_startupGate)
+        {
+            try
+            {
+                _startupService.SetEnabled(enabled);
+                return true;
+            }
+            catch (Exception exception) when (exception is UnauthorizedAccessException
+                or System.Security.SecurityException
+                or IOException
+                or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 校驗並修復開機啟動設定。
+    /// </summary>
+    private void ReconcileStartupSetting()
+    {
+        if (!_settings.StartWithWindows)
+        {
+            return;
+        }
+
+        var requestVersion = Volatile.Read(ref _startupRequestVersion);
+        var succeeded = false;
+        lock (_startupGate)
+        {
+            if (requestVersion != Volatile.Read(ref _startupRequestVersion) || !_settings.StartWithWindows)
+            {
+                return;
+            }
+
+            if (_startupService.IsUpToDate())
+            {
+                return;
+            }
+
+            succeeded = TrySetStartupEnabledCore(true);
+        }
+
+        if (succeeded || requestVersion != Volatile.Read(ref _startupRequestVersion))
+        {
+            return;
+        }
+
+        Post(() =>
+        {
+            if (requestVersion != Volatile.Read(ref _startupRequestVersion) || !_settings.StartWithWindows)
+            {
+                return;
+            }
+
+            _settings.StartWithWindows = false;
+            SaveSettings();
+            OnPropertyChanged(nameof(StartWithWindows));
+            StatusMessage = T["StartupError"];
+        });
+    }
+
+    private bool TrySetStartupEnabledCore(bool enabled)
     {
         try
         {
@@ -501,32 +745,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException
             or System.Security.SecurityException
+            or IOException
             or InvalidOperationException)
         {
             return false;
         }
-    }
-
-    /// <summary>
-    /// Registers the logon task when the saved preference says startup is enabled but the task is gone,
-    /// which is what an upgrade from the old <c>HKCU\Run</c> entry leaves behind, or still carries an
-    /// older definition, which is what an upgrade from a version that let Task Scheduler terminate
-    /// ThermoTray leaves behind.
-    /// </summary>
-    private void ReconcileStartupSetting()
-    {
-        if (!_settings.StartWithWindows || _startupService.IsUpToDate() || TrySetStartupEnabled(true))
-        {
-            return;
-        }
-
-        Post(() =>
-        {
-            _settings.StartWithWindows = false;
-            SaveSettings();
-            OnPropertyChanged(nameof(StartWithWindows));
-            StatusMessage = T["StartupError"];
-        });
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
