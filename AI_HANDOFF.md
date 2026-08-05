@@ -268,3 +268,18 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 
 - Fast-forwarded the local `main` branch from `b8625f7` to `0407c60`, integrating the committed `agent/release-1.1.4` release work without creating an unnecessary merge commit.
 - The working tree still contains the existing uncommitted GPU/card changes and was not staged, committed, stashed, or discarded. `origin/main` remains at `b8625f7`; no remote push was performed.
+
+## 2026-08-05 version 1.1.5 publication attempt
+
+- The current checkout is clean on `main` at `c62a44d`, and `origin/main` is at the same commit; the existing GitHub release is `v1.1.4`.
+- The user requested a version update and GitHub upload. The intended next patch version is `1.1.5`.
+- Publication is currently blocked before any version edit or Git mutation because `gh auth status` reports the `nojackno2-ctrl` token as invalid. No commit, push, tag, or release was created for `1.1.5`.
+- Resume after `gh auth login -h github.com` succeeds: update the single source version plus release documentation fallback, run the full win-x64 release validation, then create the release branch/commit, push, and publish the GitHub release.
+
+## 2026-08-05 version 1.1.5 release
+
+- `gh auth status` now reports a valid `nojackno2-ctrl` token, so the blocker recorded in the previous entry is cleared.
+- Pre-release validation on `main` at `c62a44d` (win-x64, Release): `dotnet build` 0 warnings / 0 errors, `dotnet test` 141/141 passed, `dotnet format --verify-no-changes` clean, and the self-contained single-file `dotnet publish` produced `publish/win-x64/ThermoTray.exe`.
+- Fixed a tray-icon defect introduced by the multi-GPU refactor: `TrayIconService.RebuildGpuIcons` re-registers the CPU `NotifyIcon` to keep the CPU-left ordering but left `_cpuIconKey` set, so the following `UpdateCpuIcon` treated the icon as unchanged and never drew onto the fresh `NotifyIcon`. The CPU tray slot went blank the first time a GPU appeared, and stayed blank whenever the CPU digits did not change afterwards (for example when no CPU sensor is readable). `_cpuIconKey` is now cleared alongside the icon replacement.
+- Bumped `<Version>` to `1.1.5` in `Directory.Build.props`, with the documentation fallbacks in `installer/ThermoTray.iss` and `README.md` updated to match.
+- Elevated live verification of the tray fix on real hardware is still pending; it needs a manual launch of the published build with a GPU present.

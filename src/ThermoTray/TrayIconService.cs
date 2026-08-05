@@ -175,6 +175,10 @@ public sealed class TrayIconService : IDisposable
             var oldCpuIcon = _cpuNotifyIcon;
             _cpuNotifyIcon = CreateNotifyIcon();
             DisposeNotifyIcon(oldCpuIcon);
+
+            // 新的 NotifyIcon 還沒有任何圖片，快取鍵必須一併清除，
+            // 否則 UpdateCpuIcon 會誤判圖示未變而跳過繪製，系統匣只剩空白格。
+            _cpuIconKey = null;
         }
 
         UpdateCpuIcon();
