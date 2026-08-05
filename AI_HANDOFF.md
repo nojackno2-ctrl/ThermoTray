@@ -216,3 +216,26 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - User requested publication to GitHub and release of the executable. The repository is `https://github.com/nojackno2-ctrl/ThermoTray.git`, currently on `main` with the full intended ThermoTray change set uncommitted.
 - `gh` version `2.95.0` is installed, but `gh auth status` reports `The token in default is invalid` for `nojackno2-ctrl`. No commit, push, pull request, or GitHub Release was performed.
 - Resume with `gh auth login -h github.com`, then rerun `gh auth status` before staging. The intended release assets are the latest portable ZIP in `artifacts\\release` and the self-contained executable from `publish\\win-x64`; Inno Setup is unavailable locally, so no fresh installer exists.
+
+## 2026-08-05 full code review and safe cleanup
+
+- The working tree was clean on `main` at `b8625f7`; the current baseline built with 0 warnings/errors, passed 137 tests, passed `dotnet format --verify-no-changes`, `git diff --check`, and an additional .NET analyzer build with 0 warnings.
+- Fixed hardware-topology lifecycle issues: removed old sensor event handlers before rebuilding the cached topology, cleared reference-keyed source-name entries when sensors are re-enumerated, retry-marked failed topology scans, and detached computer handlers when `Computer.Open()` fails so retries cannot accumulate callbacks.
+- Fixed a possible UI crash when registry I/O fails while changing the startup setting by treating `IOException` like the other expected startup failures.
+- Fixed the native HICON cleanup path so an exception during icon conversion cannot leak the temporary icon handle.
+- Fixed a startup-setting race: background reconciliation now serializes Task Scheduler operations and ignores stale results when the user changes the checkbox during the probe or registration.
+- Fixed CI/release overlap: the regular build workflow is now read-only CI and no longer triggers or creates releases on tags; the dedicated release workflow now restores with `win-x64`, publishes with the shared assets graph, and includes a `SHA256SUMS.txt` release asset as documented.
+- Final validation: Release build passed with 0 warnings/errors; all 137 tests passed; `dotnet format --verify-no-changes` and `git diff --check` passed; explicit `win-x64` self-contained single-file publish passed. The review EXE in `publish\win-x64-review` contains 9 files totalling 187,372,368 bytes, has SHA-256 `0067F2779C16CA35265E8FEEC7BBA2B7CF7C9A1E3481371B1665EA6FDDD9315D`, and its embedded manifest is `requireAdministrator`. Static workflow checks confirmed only `release.yml` owns tag releases, preserves the embedded-manifest check, and publishes `SHA256SUMS.txt`. README examples now use 1.1.3. No commit or push was performed.
+
+## 2026-08-05 complete codebase Chinese commenting
+
+- Added comprehensive Traditional Chinese XML documentation comments (`/// <summary>`) and inline logic comments to all C# source files in `src/ThermoTray/`, all unit test files in `tests/ThermoTray.Tests/`, and the Inno Setup script `installer/ThermoTray.iss`.
+- Preserved all code behavior, method signatures, and recent uncommitted bug fixes in `HardwareSensorService.cs`, `MainViewModel.cs`, and `TrayIconService.cs`.
+- Validation: `dotnet build ThermoTray.sln --configuration Release` passed with 0 warnings and 0 errors; `dotnet test ThermoTray.sln --configuration Release` passed all 137 tests; `dotnet format ThermoTray.sln --verify-no-changes` passed with code 0.
+
+## 2026-08-05 GitHub release preparation
+
+- Bumped the product version from 1.1.3 to 1.1.4 because v1.1.3 already exists on GitHub; updated the installer fallback and README release examples accordingly.
+- Explicit `win-x64` restore, Release build, 137 tests, format verification, and `git diff --check` passed.
+- Self-contained `win-x64` publish passed and `mt.exe` confirmed the embedded `requireAdministrator` manifest. Inno Setup 6.7.3 compiled `artifacts\\installer\\ThermoTray-Setup-1.1.4.exe` successfully.
+- The first local ZIP command failed because `Compress-Archive` received `FileInfo` objects instead of full paths; no product failure was indicated. Re-running with explicit full paths succeeded: installer `artifacts\\release\\ThermoTray-Setup-1.1.4.exe` is 53,992,887 bytes with SHA-256 `72DC90703E5F6F637F916A7EB2C1D70CED40EDB40F1E8052F1A0BECC13D472AB`; portable ZIP is 73,804,923 bytes with SHA-256 `FBA7485DB57BF2C4C27A329B4AEF847CDAC5B1253474EF356394CEB5703CBFCE`; the ZIP contains 8 files and no PDB.
