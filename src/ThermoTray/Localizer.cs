@@ -35,9 +35,14 @@ public sealed class Localizer
                 "CPU 溫度需要 PawnIO 核心驅動程式。LibreHardwareMonitor 0.9.6 以 PawnIO 讀取 CPU 暫存器，未安裝時 AMD Ryzen 的 Tctl/Tdie 會固定為 0，因此顯示為無法取得。安裝 PawnIO 後重新啟動 ThermoTray 即可。",
                 "CPU temperature needs the PawnIO kernel driver. LibreHardwareMonitor 0.9.6 reads CPU registers through PawnIO; without it the AMD Ryzen Tctl/Tdie sensor stays at 0, so it is reported as unavailable. Install PawnIO and restart ThermoTray."),
             ["DriverDownload"] = ("下載並安裝 PawnIO", "Download and install PawnIO"),
-            ["GpuSensorUnavailable"] = ("GPU 溫度感測器未提供可信的即時讀值。", "The GPU temperature sensor did not provide a trustworthy live reading."),
+            ["GpuSensorUnavailable"] = (
+                "{0} 的溫度感測器未提供可信的即時讀值。",
+                "The temperature sensor on {0} did not provide a trustworthy live reading."),
+            ["ListSeparator"] = ("、", ", "),
             ["CpuUsageUnavailable"] = ("CPU 使用率感測器未提供可信的即時讀值。", "The CPU utilization sensor did not provide a trustworthy live reading."),
-            ["GpuUsageUnavailable"] = ("GPU 使用率感測器未提供可信的即時讀值。", "The GPU utilization sensor did not provide a trustworthy live reading."),
+            ["GpuUsageUnavailable"] = (
+                "{0} 的使用率感測器未提供可信的即時讀值。",
+                "The utilization sensor on {0} did not provide a trustworthy live reading."),
             ["StartWithWindows"] = ("隨 Windows 啟動", "Start with Windows"),
             ["HideWhenClosed"] = ("關閉時縮小至系統匣", "Hide to tray when closed"),
             ["Language"] = ("語言", "Language"),
