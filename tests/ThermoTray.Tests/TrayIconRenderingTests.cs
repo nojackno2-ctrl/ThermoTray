@@ -4,16 +4,15 @@ using Xunit;
 namespace ThermoTray.Tests;
 
 /// <summary>
-/// Guards what the tray icon actually puts on screen. The readings it shows are the whole point of the
-/// application, so a digit that is dropped or cut in half is a correctness problem, not a cosmetic one.
+/// <see cref="TrayIconService.CreateIconBitmap"/> 位元圖繪製視覺效果單元測試。
+/// 確保數字不會被截斷或毀損。
 /// </summary>
 public sealed class TrayIconRenderingTests
 {
     private const int IconSize = 16;
 
     /// <summary>
-    /// A three-digit reading used to be drawn into a rectangle it could not fit, and the part that did
-    /// not fit was cut off rather than scaled down, so 100 appeared as 10.
+    /// 驗證三位數字 ("100") 的繪製像素分佈與二位數字 ("10") 不同，確保三位數字不被截斷為二位數。
     /// </summary>
     [Fact]
     public void CreateIconBitmap_DrawsThreeDigitsDifferentlyFromTwo()
@@ -24,6 +23,9 @@ public sealed class TrayIconRenderingTests
         Assert.NotEqual(Describe(three), Describe(two));
     }
 
+    /// <summary>
+    /// 驗證上下兩行（使用率與溫度）均包含實際繪製的墨水像素。
+    /// </summary>
     [Theory]
     [InlineData("1", "49")]
     [InlineData("100", "89")]
@@ -38,8 +40,7 @@ public sealed class TrayIconRenderingTests
     }
 
     /// <summary>
-    /// Each line is scaled to fill its half of the icon, so a reading that covers only a sliver of its
-    /// half means the digits were clipped or shrunk away rather than fitted.
+    /// 驗證數字自動縮放後填滿絕大部分行高度，不致因縮小過度而無法辨識。
     /// </summary>
     [Theory]
     [InlineData("1", "49")]
@@ -53,7 +54,9 @@ public sealed class TrayIconRenderingTests
         Assert.True(InkRowCount(bitmap, IconSize / 2, IconSize) >= (IconSize / 2) - 1, "the temperature digits are too short");
     }
 
-    /// <summary>The digits have to stay inside the icon; anything drawn outside it is simply lost.</summary>
+    /// <summary>
+    /// 驗證輸出的位元圖像素尺寸精確符合請求的尺寸。
+    /// </summary>
     [Fact]
     public void CreateIconBitmap_UsesTheRequestedSize()
     {
@@ -83,7 +86,9 @@ public sealed class TrayIconRenderingTests
         return count;
     }
 
-    /// <summary>Rows carrying any ink, which is how tall the digits ended up rather than how wide.</summary>
+    /// <summary>
+    /// 計算包含非透明像素的總行數。
+    /// </summary>
     private static int InkRowCount(Bitmap bitmap, int topRow, int bottomRow)
     {
         var rows = 0;

@@ -8,9 +8,8 @@ using Xunit;
 namespace ThermoTray.Tests;
 
 /// <summary>
-/// A card is a rounded <see cref="Border"/>, and a rounded border clips whatever does not fit inside
-/// it. The window therefore has to take its height from its content: any fixed height silently cuts
-/// the last line off the cards on the first system font, display scale, or translation needing more room.
+/// 主視窗 WPF UI 幾何佈局與元件視覺呈現單元測試。
+/// 確保卡片內容文字、標題版本號與底部設定選項均正常顯示且未遭裁切。
 /// </summary>
 public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
 {
@@ -18,6 +17,9 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
 
     public MainWindowLayoutTests(MainWindowFixture fixture) => _fixture = fixture;
 
+    /// <summary>
+    /// 驗證 CPU 與 GPU 卡片元件內容完整顯示，末行文字未被 Border 裁切。
+    /// </summary>
     [Fact]
     public void TheCardsShowTheirWholeContents() =>
         _fixture.Invoke(window =>
@@ -27,8 +29,7 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         });
 
     /// <summary>
-    /// Growing the cards must not push the settings underneath them out of the window, which is the
-    /// other way a content-sized layout can lose something without any visible sign that it did.
+    /// 驗證卡片下方的設定選項面板完整留在視窗內部，未被擠出視窗底部邊界。
     /// </summary>
     [Fact]
     public void TheSettingsBelowTheCardsStayInTheWindow() =>
@@ -44,17 +45,14 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         });
 
     /// <summary>
-    /// The height has to follow the content. Without this the window keeps whatever height it was given
-    /// and the cards absorb the shortfall by clipping, which is how a device name lost its last line.
+    /// 驗證視窗 SizeToContent 設定為 Height（視窗高度隨內容動態調配）。
     /// </summary>
     [Fact]
     public void TheWindowTakesItsHeightFromItsContent() =>
         _fixture.Invoke(window => Assert.Equal(SizeToContent.Height, window.SizeToContent));
 
     /// <summary>
-    /// The version has to be on screen rather than merely bound. It sits beside the title in a
-    /// horizontal row, which is a layout that can push it past the right edge, and a run of text that
-    /// renders nothing still reports a position like any other.
+    /// 驗證標題列顯示正確的產品版本號，且渲染寬度大於 0 並未超出右側邊界。
     /// </summary>
     [Fact]
     public void TheHeaderShowsTheProductVersion() =>
@@ -72,9 +70,7 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         });
 
     /// <summary>
-    /// The last child is the device name, the longest and least predictable text on the card. Where it
-    /// ends up is measured against the card rather than eyeballed, because a clipped card still reports
-    /// a sensible size; only the text's own position gives it away.
+    /// 檢查卡片最後一行文字控制項是否完全落在 Border 內距允許範圍內。
     /// </summary>
     private static void AssertContentFits(Border card, string which)
     {
@@ -90,12 +86,10 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
 }
 
 /// <summary>
-/// Holds the one WPF <see cref="Application"/> an AppDomain is allowed, plus the real window built on
-/// its own UI thread, so every layout test shares them.
+/// 為 WPF 視窗 UI 測試提供單一 AppDomain UI 執行緒 (STA) 與 MainWindow 實例的測試固件。
 /// </summary>
 public sealed class MainWindowFixture : IDisposable
 {
-    /// <summary>As long as any real processor reports, so the cards have to cope with the longest case.</summary>
     private const string LongCpuName = "AMD Ryzen 9 5900HS with Radeon Graphics • Core (Tctl/Tdie)";
     private const string LongGpuName = "NVIDIA GeForce RTX 3060 Laptop GPU • GPU Core";
 
@@ -126,7 +120,6 @@ public sealed class MainWindowFixture : IDisposable
             }
             finally
             {
-                // Set from a finally so a failure up there cannot leave the constructor waiting forever.
                 ready.Set();
             }
 
@@ -153,6 +146,9 @@ public sealed class MainWindowFixture : IDisposable
         _application = application!;
     }
 
+    /// <summary>
+    /// 在 UI 執行緒分派執行斷言。
+    /// </summary>
     public void Invoke(Action<MainWindow> assert)
     {
         Exception? failure = null;
@@ -184,6 +180,9 @@ public sealed class MainWindowFixture : IDisposable
         _dispatcher.InvokeShutdown();
     }
 
+    /// <summary>
+    /// 建立填入長硬體名稱測試資料的隱藏測試視窗。
+    /// </summary>
     private static MainWindow CreateWindow()
     {
         var viewModel = new MainViewModel(new HardwareSensorService(), new SettingsService(), new StartupService());
@@ -198,7 +197,6 @@ public sealed class MainWindowFixture : IDisposable
         {
             DataContext = viewModel,
             ShowInTaskbar = false,
-            // Far enough off screen that the test never flashes a window at whoever is watching.
             Left = -20000,
             Top = -20000,
         };

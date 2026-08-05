@@ -4,44 +4,59 @@ using Xunit;
 
 namespace ThermoTray.Tests;
 
+/// <summary>
+/// <see cref="InstanceProtocol.Decide"/> 版本比較與處置決策單元測試。
+/// </summary>
 public sealed class InstanceDecisionTests
 {
-    /// <summary>The ordinary second launch: same build, so it just raises the window that exists.</summary>
+    /// <summary>
+    /// 驗證相同版本時採無聲 Handover (ShowRunning)。
+    /// </summary>
     [Fact]
     public void Decide_HandsOverToTheSameVersion() =>
         Assert.Equal(
             InstanceAction.ShowRunning,
             InstanceProtocol.Decide(new Version(1, 1, 3, 0), new Version(1, 1, 3, 0)));
 
-    /// <summary>Launching an upgrade has to be able to take the tray from the version it replaces.</summary>
+    /// <summary>
+    /// 驗證新版啟動且已存在舊版時，建議替換舊版 (ReplaceRunning)。
+    /// </summary>
     [Fact]
     public void Decide_OffersToReplaceAnOlderVersion() =>
         Assert.Equal(
             InstanceAction.ReplaceRunning,
             InstanceProtocol.Decide(new Version(1, 1, 2, 0), new Version(1, 1, 3, 0)));
 
-    /// <summary>A stale shortcut must not silently downgrade what the user is running.</summary>
+    /// <summary>
+    /// 驗證舊版啟動且已存在新版時，建議保留新版並顯示新版視窗 (ShowNewerRunning)。
+    /// </summary>
     [Fact]
     public void Decide_KeepsTheNewerRunningVersion() =>
         Assert.Equal(
             InstanceAction.ShowNewerRunning,
             InstanceProtocol.Decide(new Version(1, 1, 3, 0), new Version(1, 1, 2, 0)));
 
-    /// <summary>Only three components name a release, so the build's fourth one is not a difference.</summary>
+    /// <summary>
+    /// 驗證比較版本時忽略第四位的 Revision。
+    /// </summary>
     [Fact]
     public void Decide_IgnoresTheFourthComponent() =>
         Assert.Equal(
             InstanceAction.ShowRunning,
             InstanceProtocol.Decide(new Version(1, 1, 3), new Version(1, 1, 3, 0)));
 
-    /// <summary>A numeric comparison, not a textual one: 1.1.10 is newer than 1.1.9, not older.</summary>
+    /// <summary>
+    /// 驗證版號為數值比較（如 1.1.10 新於 1.1.9）。
+    /// </summary>
     [Fact]
     public void Decide_ComparesNumerically() =>
         Assert.Equal(
             InstanceAction.ReplaceRunning,
             InstanceProtocol.Decide(new Version(1, 1, 9, 0), new Version(1, 1, 10, 0)));
 
-    /// <summary>With nothing to compare, taking the tray from a running instance is not justified.</summary>
+    /// <summary>
+    /// 驗證無法解析或其中一方版本為 null 時傳回安全的 ShowRunning。
+    /// </summary>
     [Fact]
     public void Decide_HandsOverWhenAVersionIsUnknown()
     {
@@ -50,8 +65,14 @@ public sealed class InstanceDecisionTests
     }
 }
 
+/// <summary>
+/// <see cref="InstanceProtocol"/> 身份識別字串格式化與解析單元測試。
+/// </summary>
 public sealed class InstanceIdentityTests
 {
+    /// <summary>
+    /// 驗證身份字串序列化與反序列化一致。
+    /// </summary>
     [Fact]
     public void Identity_SurvivesTheRoundTrip()
     {
@@ -62,7 +83,9 @@ public sealed class InstanceIdentityTests
         Assert.Equal(4242, processId);
     }
 
-    /// <summary>An assembly with no version still has to identify itself as ThermoTray.</summary>
+    /// <summary>
+    /// 驗證版本號為 null 時仍可產出與解析包含 UnknownVersion 的身份字串。
+    /// </summary>
     [Fact]
     public void Identity_CarriesAnUnknownVersion()
     {
@@ -71,7 +94,9 @@ public sealed class InstanceIdentityTests
         Assert.Equal(7, processId);
     }
 
-    /// <summary>Anything else that opens the pipe must not be mistaken for a running instance.</summary>
+    /// <summary>
+    /// 驗證非規範格式字串被拒絕。
+    /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -85,14 +110,16 @@ public sealed class InstanceIdentityTests
         Assert.False(InstanceProtocol.TryParseIdentity(line, out _, out _));
 }
 
+/// <summary>
+/// 具名管道實體通訊 (<see cref="InstanceServer"/> / <see cref="InstanceClient"/>) 單元測試。
+/// </summary>
 public sealed class InstanceHandoverTests
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan CallbackTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// The whole exchange over a real named pipe: a launch learns who is running and asks for that
-    /// instance's window. Everything the startup path decides depends on this answer being real.
+    /// 驗證客戶端能成功連接管道伺服器、讀取執行中版本並發送 SHOW 請求。
     /// </summary>
     [Fact]
     public void AConnectingLaunchLearnsTheRunningVersionAndRaisesItsWindow()
@@ -111,7 +138,9 @@ public sealed class InstanceHandoverTests
         Assert.True(shown.Wait(CallbackTimeout));
     }
 
-    /// <summary>The upgrade path: the older instance is asked to leave and acknowledges before it does.</summary>
+    /// <summary>
+    /// 驗證發送 EXIT 請求時，伺服器發送 OK 確認後觸發退出委派。
+    /// </summary>
     [Fact]
     public void AReplacingLaunchIsAcknowledgedBeforeTheRunningInstanceExits()
     {
@@ -128,8 +157,7 @@ public sealed class InstanceHandoverTests
     }
 
     /// <summary>
-    /// Each exchange closes its connection, so the listener has to come back for the next launch.
-    /// A one-shot server would leave every later launch unable to reach the running instance.
+    /// 驗證管道伺服器在單次通訊結束後能持續監聽回應後續請求。
     /// </summary>
     [Fact]
     public void TheRunningInstanceKeepsAnsweringLaterLaunches()
@@ -158,14 +186,15 @@ public sealed class InstanceHandoverTests
     }
 
     /// <summary>
-    /// Nothing is listening under this name, which is also what a build older than the pipe looks
-    /// like. The caller has to be told so it can fall back instead of waiting forever.
+    /// 驗證連接不存在的管道時傳回 null。
     /// </summary>
     [Fact]
     public void AnUnreachableInstanceReportsNoClient() =>
         Assert.Null(InstanceClient.TryConnect(UniquePipeName(), TimeSpan.FromMilliseconds(500)));
 
-    /// <summary>Shutdown has to release the name, or the replacing instance would never be reachable.</summary>
+    /// <summary>
+    /// 驗證處置 (Dispose) 伺服器後，新連線無法連通。
+    /// </summary>
     [Fact]
     public void ADisposedServerStopsAnsweringConnections()
     {
@@ -183,7 +212,6 @@ public sealed class InstanceHandoverTests
         return new TestServer(pipeName, server);
     }
 
-    /// <summary>A pipe name is machine wide, so tests must not collide with each other or a real instance.</summary>
     private static string UniquePipeName() => "ThermoTray.Tests." + Guid.NewGuid().ToString("N");
 
     private sealed class TestServer(string pipeName, InstanceServer server) : IDisposable
@@ -194,11 +222,13 @@ public sealed class InstanceHandoverTests
     }
 }
 
+/// <summary>
+/// 驗證 Inno Setup 安裝腳本與程式碼間全域互斥鎖名稱一致性的單元測試。
+/// </summary>
 public sealed class SetupMutexContractTests
 {
     /// <summary>
-    /// The installer can only see a running ThermoTray through this exact name. A rename on either
-    /// side would silently bring back overwriting a locked executable.
+    /// 驗證 `installer/ThermoTray.iss` 中的 AppMutex 數值與程式碼中的 `InstanceCoordinator.SetupMutexName` 完全吻合。
     /// </summary>
     [Fact]
     public void TheInstallerWaitsOnTheMutexTheApplicationCreates()

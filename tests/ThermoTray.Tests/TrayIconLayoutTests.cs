@@ -2,11 +2,19 @@ using Xunit;
 
 namespace ThermoTray.Tests;
 
+/// <summary>
+/// <see cref="TrayIconLayout"/> 系統匣圖示幾何佈局計算單元測試。
+/// </summary>
 public sealed class TrayIconLayoutTests
 {
-    /// <summary>Notification-area icon sizes for the display scales Windows offers.</summary>
+    /// <summary>
+    /// 各種 DPI 縮放比例下常見的系統匣圖示尺寸。
+    /// </summary>
     public static TheoryData<int> IconSizes => new(16, 20, 24, 32, 40, 48);
 
+    /// <summary>
+    /// 驗證上下兩行區域完全在畫布範圍內。
+    /// </summary>
     [Theory]
     [MemberData(nameof(IconSizes))]
     public void GetLines_KeepsBothLinesInsideTheCanvas(int iconSize)
@@ -23,6 +31,9 @@ public sealed class TrayIconLayoutTests
         }
     }
 
+    /// <summary>
+    /// 驗證兩行區域完全區隔不重疊。
+    /// </summary>
     [Theory]
     [MemberData(nameof(IconSizes))]
     public void GetLines_SeparatesTheTwoLines(int iconSize)
@@ -33,6 +44,9 @@ public sealed class TrayIconLayoutTests
         Assert.True(temperature.Top >= usage.Bottom, "the temperature line overlaps the utilization line");
     }
 
+    /// <summary>
+    /// 驗證兩行區域具有相同的形狀與寬高。
+    /// </summary>
     [Theory]
     [MemberData(nameof(IconSizes))]
     public void GetLines_GivesTheTwoLinesTheSameShape(int iconSize)
@@ -46,8 +60,7 @@ public sealed class TrayIconLayoutTests
     }
 
     /// <summary>
-    /// The digits are only as tall as the line they are scaled into, so most of the icon has to reach
-    /// them. A layout that spent its height on padding is what made the readings hard to make out.
+    /// 驗證絕大部分畫布高度均分配給文字繪製（使用率超過 90%）。
     /// </summary>
     [Theory]
     [MemberData(nameof(IconSizes))]
@@ -60,6 +73,9 @@ public sealed class TrayIconLayoutTests
         Assert.True(usage.Width / canvasSize >= 0.9f);
     }
 
+    /// <summary>
+    /// 驗證畫布放大倍率大於 1（Supersampling 超高採樣）。
+    /// </summary>
     [Fact]
     public void GetCanvasSize_DrawsLargerThanTheIconSoStrokesCanBeAveragedDown() =>
         Assert.True(TrayIconLayout.GetCanvasSize(TrayIconLayout.MinimumIconSize) > TrayIconLayout.MinimumIconSize);

@@ -1,10 +1,23 @@
 namespace ThermoTray;
 
+/// <summary>
+/// 提供多語系 UI 字串本地化服務（支援繁體中文與英文）。
+/// </summary>
 public sealed class Localizer
 {
+    /// <summary>
+    /// 預設語言代碼（繁體中文 "zh-TW"）。
+    /// </summary>
     public const string DefaultLanguage = "zh-TW";
+
+    /// <summary>
+    /// 英文語言代碼 ("en-US")。
+    /// </summary>
     public const string EnglishLanguage = "en-US";
 
+    /// <summary>
+    /// 雙語字串對照字典。索引鍵為字串 Key，值為 (繁體中文, 英文) 的二元組。
+    /// </summary>
     private static readonly IReadOnlyDictionary<string, (string TraditionalChinese, string English)> Strings =
         new Dictionary<string, (string, string)>
         {
@@ -49,17 +62,37 @@ public sealed class Localizer
                 "Could not close the running ThermoTray {0}. Exit it from the notification area, then start this version again."),
         };
 
+    /// <summary>
+    /// 初始化 Localizer 的新實例。
+    /// </summary>
+    /// <param name="language">語系代碼（如 "zh-TW" 或 "en-US"）。</param>
     public Localizer(string language) => Language = Normalize(language);
 
+    /// <summary>
+    /// 取得當前使用的語言代碼。
+    /// </summary>
     public string Language { get; private set; }
 
+    /// <summary>
+    /// 依據指定的 Key 取得本地化後的文字。
+    /// </summary>
+    /// <param name="key">字串 Key。</param>
+    /// <returns>若找到 Key 則傳回對應語言的文字，否則傳回 Key 原字串。</returns>
     public string this[string key] => Strings.TryGetValue(key, out var text)
         ? Language == EnglishLanguage ? text.English : text.TraditionalChinese
         : key;
 
+    /// <summary>
+    /// 切換當前的語言。
+    /// </summary>
+    /// <param name="language">目標語言代碼。</param>
     public void SetLanguage(string language) => Language = Normalize(language);
 
-    /// <summary>Maps anything unrecognised, including a hand-edited settings file, onto a supported language.</summary>
+    /// <summary>
+    /// 將未辨識或格式不符合的語言代碼標準化為系統支援的語言代碼（預設為繁體中文）。
+    /// </summary>
+    /// <param name="language">輸入的語言字串。</param>
+    /// <returns>標準化後的語言代碼。</returns>
     private static string Normalize(string? language) =>
         string.Equals(language, EnglishLanguage, StringComparison.OrdinalIgnoreCase) ? EnglishLanguage : DefaultLanguage;
 }

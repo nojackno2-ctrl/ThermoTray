@@ -57,7 +57,7 @@ dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-c
 
 ### 建立安裝檔
 
-安裝 [Inno Setup](https://jrsoftware.org/isinfo.php)，以 Inno Setup Compiler 開啟 `installer\ThermoTray.iss` 並編譯（命令列可用 `ISCC.exe /DAppVersion=1.1.1 installer\ThermoTray.iss` 指定版本）。它會使用 `publish\win-x64` 的輸出，安裝檔生成於 `artifacts\installer`。安裝精靈安裝到目前使用者的 LocalAppData，本身不需系統管理員權限；啟動 ThermoTray 時才會顯示 UAC。登入自動啟動請在程式內勾選「隨 Windows 啟動」。安裝精靈使用英文；已安裝的 ThermoTray 本身可切換繁體中文與英文。
+安裝 [Inno Setup](https://jrsoftware.org/isinfo.php)，以 Inno Setup Compiler 開啟 `installer\ThermoTray.iss` 並編譯（命令列可用 `ISCC.exe /DAppVersion=1.1.4 installer\ThermoTray.iss` 指定版本）。它會使用 `publish\win-x64` 的輸出，安裝檔生成於 `artifacts\installer`。安裝精靈安裝到目前使用者的 LocalAppData，本身不需系統管理員權限；啟動 ThermoTray 時才會顯示 UAC。登入自動啟動請在程式內勾選「隨 Windows 啟動」。安裝精靈使用英文；已安裝的 ThermoTray 本身可切換繁體中文與英文。
 
 ### 溫度正確性說明
 
@@ -89,4 +89,4 @@ Build it with Visual Studio 2022 / .NET 8 using `ThermoTray.sln` and run `dotnet
 
 After installation, accept UAC and wait one or two seconds for the first sample. CPU/GPU utilization and temperature are shown together; 0% is a valid idle reading, while missing data is shown as `Unavailable` and never as `0 °C` for temperature. Each tray icon places utilization above temperature. The CPU tray icon should be left of the GPU icon unless Windows has preserved a manually rearranged notification-area order. The startup option creates a `ThermoTray` logon task with `RL HIGHEST` so it can start elevated without another UAC prompt.
 
-For a tagged GitHub release, push a tag matching the version in `Directory.Build.props`, such as `v1.1.1`. The workflow verifies the tag, publishes the self-contained `win-x64` build, creates the Inno Setup installer, creates a PDB-free portable ZIP, verifies the embedded `requireAdministrator` manifest, and publishes SHA-256 checksums with the release assets.
+For a tagged GitHub release, push a tag matching the version in `Directory.Build.props`, such as `v1.1.4`. The release workflow verifies the tag, publishes the self-contained `win-x64` build, creates the Inno Setup installer, creates a PDB-free portable ZIP, verifies the embedded `requireAdministrator` manifest, and publishes SHA-256 checksums with the release assets.

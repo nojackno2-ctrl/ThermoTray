@@ -8,8 +8,10 @@ using Microsoft.Win32;
 namespace ThermoTray;
 
 /// <summary>
-/// Registers automatic startup as a highest-run-level logon task. A plain <c>HKCU\Run</c>
-/// entry cannot launch an application whose manifest requires administrator rights.
+/// 負責設定 Windows 自動啟動的服務類別。
+/// 由於 ThermoTray 要求最高管理員權限 (requireAdministrator)，
+/// 一般的 <c>HKCU\Run</c> 登錄檔寫法會在開機時被 Windows 阻擋而無法執行，
+/// 因此本服務透過工作排程器 (Task Scheduler) 建立具備最高權限 (<c>HighestAvailable</c>) 的登入觸發工作。
 /// </summary>
 public sealed class StartupService
 {
@@ -19,22 +21,26 @@ public sealed class StartupService
     private const int TimeoutMilliseconds = 10_000;
 
     /// <summary>
-    /// Written into the task's Source field and checked at every launch. Bump it whenever
-    /// <see cref="BuildTaskDefinition"/> changes, so an installation still carrying an older
-    /// definition is registered again instead of keeping settings this version no longer uses.
+    /// 寫入排程工作 Source 欄位中的識別標記。每當 <see cref="BuildTaskDefinition"/>XML 結構有重大更新時即遞增，
+    /// 應用程式開機或啟動時會檢查此標記，若舊版本排程缺少此標記則自動重建更新。
     /// </summary>
     internal const string DefinitionMarker = "ThermoTray startup task (definition 2)";
 
     /// <summary>
-    /// True when the logon task exists and carries this version's definition. A task written by an
-    /// earlier version counts as absent, so startup is registered again: those tasks were created from
-    /// <c>schtasks</c> switches alone and therefore kept its defaults, which Task Scheduler enforces by
-    /// terminating ThermoTray. See <see cref="BuildTaskDefinition"/>.
+    /// 檢查開機啟動排程工作是否存在且為最新版本定義。
+    /// 舊版本透過 `schtasks` 命令列產生的預設排程會在改用電池或運行 3 天後強制關閉 ThermoTray，因此需判斷並自動更新。
     /// </summary>
+    /// <returns>若排程存在且包含最新標記傳回 true，否則傳回 false。</returns>
     public bool IsUpToDate() =>
         RunSchtasks($"/Query /TN {TaskName} /XML", out var definition)
         && definition.Contains(DefinitionMarker, StringComparison.Ordinal);
 
+    /// <summary>
+    /// 設定或取消開機自動啟動。
+    /// </summary>
+    /// <param name="enabled">True 表示開啟自動啟動，False 表示關閉自動啟動。</param>
+    /// <exception cref="InvalidOperationException">當無法取得執行檔路徑時擲出。</exception>
+    /// <exception cref="UnauthorizedAccessException">當未具備管理員權限或無法建立排程時擲出。</exception>
     public void SetEnabled(bool enabled)
     {
         if (!enabled)
@@ -55,15 +61,19 @@ public sealed class StartupService
         RemoveRunValue();
     }
 
+    /// <summary>
+    /// 嘗試建立高權限開機排程工作。將 XML 定義檔寫入臨時路徑後透過 `schtasks /Create /XML` 匯入。
+    /// </summary>
+    /// <param name="executablePath">ThermoTray 執行檔路徑。</param>
+    /// <returns>若建立成功傳回 true，否則傳回 false。</returns>
     private static bool TryCreateElevatedTask(string executablePath)
     {
-        // A random name rather than a fixed one, because the file is read back by an elevated
-        // Task Scheduler and must not be a path another process can predict and replace first.
+        // 使用隨機檔名建立臨時 XML 定義檔，防止預測性路徑替換漏洞
         var definitionPath = Path.Combine(Path.GetTempPath(), $"ThermoTray-{Path.GetRandomFileName()}.xml");
 
         try
         {
-            // schtasks reads the definition as UTF-16 and rejects the file outright otherwise.
+            // schtasks 要求 XML 定義檔必須為 UTF-16 編碼，否則拒絕解析
             File.WriteAllText(definitionPath, BuildTaskDefinition(executablePath, GetCurrentUserId()), Encoding.Unicode);
             return RunSchtasks($"/Create /TN {TaskName} /XML \"{definitionPath}\" /F", out _);
         }
@@ -80,14 +90,13 @@ public sealed class StartupService
     }
 
     /// <summary>
-    /// The full definition ThermoTray registers, rather than the <c>schtasks /Create</c> switches that
-    /// wrote earlier versions. The settings that matter here have no switch, and the defaults schtasks
-    /// leaves in their place are wrong for an application meant to sit in the notification area
-    /// indefinitely: Task Scheduler stops the task after three days of uptime, refuses to start it while
-    /// a laptop is on battery, and hard-terminates it the moment the machine switches to battery power.
-    /// A tray icon that disappears when the charger is unplugged is indistinguishable from a crash, and
-    /// because the process is killed rather than faulted it leaves nothing in the event log to explain it.
+    /// 建立完整且正確的排程工作 XML 定義字串。
+    /// 明確將 `DisallowStartIfOnBatteries`、`StopIfGoingOnBatteries` 與 `ExecutionTimeLimit` 設定為無限制/不中斷，
+    /// 避免預設行為導致筆記型電腦在拔除電源或執行超過 72 小時後被 Task Scheduler 強制結束處理程序。
     /// </summary>
+    /// <param name="executablePath">執行檔路徑。</param>
+    /// <param name="userId">當前使用者 SID 或帳戶名稱。</param>
+    /// <returns>UTF-16 格式之 XML 排程定義內文。</returns>
     internal static string BuildTaskDefinition(string executablePath, string userId) =>
         $"""
         <?xml version="1.0" encoding="UTF-16"?>
@@ -138,9 +147,9 @@ public sealed class StartupService
         """;
 
     /// <summary>
-    /// The account's SID rather than its name, so the definition survives a renamed account and does
-    /// not depend on the domain form this machine happens to report.
+    /// 取得當前使用者的 SID 字串（如 S-1-5-21...）。優先使用 SID 可防止使用者變更帳戶名稱後排程失效。
     /// </summary>
+    /// <returns>SID 字串或 DOMAIN\User 格式字串。</returns>
     private static string GetCurrentUserId()
     {
         try
@@ -153,14 +162,20 @@ public sealed class StartupService
         }
         catch (SecurityException)
         {
-            // Fall through to the account name, which Task Scheduler also accepts.
+            // 退回使用 Domain\User 名稱
         }
 
         return $"{Environment.UserDomainName}\\{Environment.UserName}";
     }
 
+    /// <summary>
+    /// 對 XML 敏感字元進行安全轉義。
+    /// </summary>
     private static string Escape(string value) => SecurityElement.Escape(value) ?? string.Empty;
 
+    /// <summary>
+    /// 清理產生的臨時 XML 定義檔。
+    /// </summary>
     private static void TryDeleteDefinition(string definitionPath)
     {
         try
@@ -169,12 +184,21 @@ public sealed class StartupService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // The task is already registered; a leftover temporary file is not worth failing over.
+            // 臨時檔殘留不會造成致命影響，忽略刪除失敗
         }
     }
 
+    /// <summary>
+    /// 刪除既有的 ThermoTray 排程工作。
+    /// </summary>
     private static void RemoveScheduledTask() => RunSchtasks($"/Delete /TN {TaskName} /F", out _);
 
+    /// <summary>
+    /// 呼叫系統 `schtasks.exe` 命令，並同步清空標準輸出與錯誤串流，防止管線緩衝區滿載造成死鎖。
+    /// </summary>
+    /// <param name="arguments">命令列引數。</param>
+    /// <param name="standardOutput">輸出的標準文字內容。</param>
+    /// <returns>若命令成功執行且 ExitCode 為 0 傳回 true，否則傳回 false。</returns>
     private static bool RunSchtasks(string arguments, out string standardOutput)
     {
         standardOutput = string.Empty;
@@ -194,8 +218,7 @@ public sealed class StartupService
                 return false;
             }
 
-            // Both pipes must be drained concurrently. Leaving either one unread lets schtasks block
-            // forever on a full pipe buffer instead of exiting.
+            // 同步讀取 StandardOutput 與 StandardError，避免管線堵塞
             var outputRead = process.StandardOutput.ReadToEndAsync();
             var errorRead = process.StandardError.ReadToEndAsync();
 
@@ -205,10 +228,9 @@ public sealed class StartupService
                 return false;
             }
 
-            // The parameterless overload also waits for the redirected streams to finish.
+            // 等待重定向串流讀取完畢
             process.WaitForExit();
 
-            // Observed so a failed read cannot resurface later as an unobserved task exception.
             _ = errorRead.Exception;
             if (outputRead.Exception is null)
             {
@@ -223,7 +245,9 @@ public sealed class StartupService
         }
     }
 
-    /// <summary>Stops a schtasks call that outlived its timeout so it cannot linger as an orphan.</summary>
+    /// <summary>
+    /// 強制結束超時的 schtasks 處理程序。
+    /// </summary>
     private static void Terminate(Process process)
     {
         try
@@ -232,10 +256,13 @@ public sealed class StartupService
         }
         catch (Exception)
         {
-            // The process already exited or cannot be stopped; either way the call has failed.
+            // 處理程序已退出或無法中止
         }
     }
 
+    /// <summary>
+    /// 清除舊有的 `HKCU\Run` 登錄檔數值（移轉至 Task Scheduler 排程工作）。
+    /// </summary>
     private static void RemoveRunValue()
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);

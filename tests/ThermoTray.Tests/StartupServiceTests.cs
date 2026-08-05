@@ -5,9 +5,8 @@ using Xunit;
 namespace ThermoTray.Tests;
 
 /// <summary>
-/// Guards the logon-task definition. Every assertion here stands for a way Task Scheduler used to
-/// terminate ThermoTray while it sat in the notification area, which looked like a random crash and
-/// left nothing in the event log because the process was killed rather than faulted.
+/// <see cref="StartupService"/> 開機啟動工作排程器 (Task Scheduler) XML 定義檔單元測試。
+/// 確保排程設定防範拔除電源或 uptime 超過 72 小時被 Task Scheduler 強制結束處理程序的情況。
 /// </summary>
 public sealed class StartupServiceTests
 {
@@ -15,16 +14,23 @@ public sealed class StartupServiceTests
     private const string UserId = "S-1-5-21-1-2-3-1001";
     private static readonly XNamespace TaskNamespace = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
+    /// <summary>
+    /// 驗證生成的字串為格式合法的 XML。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_IsWellFormedXml() =>
         Assert.Equal("Task", Parse().Name.LocalName);
 
-    /// <summary>schtasks reads the definition as UTF-16, so the declaration has to say so.</summary>
+    /// <summary>
+    /// 驗證 XML 開頭宣告包含 `encoding="UTF-16"`（schtasks 的必要規範）。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_DeclaresTheEncodingSchtasksExpects() =>
         Assert.StartsWith("""<?xml version="1.0" encoding="UTF-16"?>""", Definition(), StringComparison.Ordinal);
 
-    /// <summary>A laptop that switches to battery must not lose its tray icons.</summary>
+    /// <summary>
+    /// 驗證關閉所有可能中斷排程執行的設定 (DisallowStartIfOnBatteries, StopIfGoingOnBatteries, AllowHardTerminate, RunOnlyIfIdle)。
+    /// </summary>
     [Theory]
     [InlineData("DisallowStartIfOnBatteries")]
     [InlineData("StopIfGoingOnBatteries")]
@@ -33,16 +39,23 @@ public sealed class StartupServiceTests
     public void BuildTaskDefinition_TurnsOffEverySettingThatCanStopTheTask(string setting) =>
         Assert.Equal("false", Setting(setting));
 
-    /// <summary>Zero means no limit; the schtasks default stopped the task after three days of uptime.</summary>
+    /// <summary>
+    /// 驗證 ExecutionTimeLimit 設定為 "PT0S"（代表無時間限制），避免預設 72 小時後終止。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_PlacesNoTimeLimitOnHowLongThermoTrayRuns() =>
         Assert.Equal("PT0S", Setting("ExecutionTimeLimit"));
 
-    /// <summary>Idle settings only apply to an idle-only task, but they are set so no upgrade path can re-enable them.</summary>
+    /// <summary>
+    /// 驗證 StopOnIdleEnd 設定為 false。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_DoesNotStopTheTaskWhenTheMachineStopsBeingIdle() =>
         Assert.Equal("false", Parse().Descendants(TaskNamespace + "StopOnIdleEnd").Single().Value);
 
+    /// <summary>
+    /// 驗證 Principal 設定為當前使用者互動登入時以 HighestAvailable 權限執行。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_RunsElevatedAsTheCurrentUserAtLogon()
     {
@@ -54,6 +67,9 @@ public sealed class StartupServiceTests
         Assert.Equal(UserId, Parse().Descendants(TaskNamespace + "LogonTrigger").Single().Element(TaskNamespace + "UserId")?.Value);
     }
 
+    /// <summary>
+    /// 驗證 Exec Action 帶有 `--minimized` 參數。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_StartsTheExecutableMinimised()
     {
@@ -63,12 +79,16 @@ public sealed class StartupServiceTests
         Assert.Equal("--minimized", exec.Element(TaskNamespace + "Arguments")?.Value);
     }
 
-    /// <summary>The marker is how an installation carrying an older definition is recognised and rewritten.</summary>
+    /// <summary>
+    /// 驗證 Source 包含版本標記字串。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_CarriesTheDefinitionMarkerLaunchLooksFor() =>
         Assert.Equal(StartupService.DefinitionMarker, Parse().Descendants(TaskNamespace + "Source").Single().Value);
 
-    /// <summary>An installation directory may legitimately contain XML metacharacters.</summary>
+    /// <summary>
+    /// 驗證路徑包含特殊字元時有進行安全轉義。
+    /// </summary>
     [Fact]
     public void BuildTaskDefinition_EscapesThePathInsteadOfBreakingTheDocument()
     {
@@ -79,10 +99,7 @@ public sealed class StartupServiceTests
     }
 
     /// <summary>
-    /// Hands the definition to Task Scheduler's own parser, which is the only thing that decides whether
-    /// <c>schtasks /Create /XML</c> will accept it: well-formed XML is not enough, because the service
-    /// also validates element order and values against its schema. Setting the text validates it and
-    /// nothing else, so no task is registered by this test.
+    /// 使用 Windows 原生 COM 物件 `Schedule.Service` 驗證排程 XML 格式可被 Task Scheduler 解構解析。
     /// </summary>
     [Fact]
     public void BuildTaskDefinition_IsAcceptedByTaskScheduler()

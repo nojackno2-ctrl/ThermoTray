@@ -6,22 +6,25 @@ using Forms = System.Windows.Forms;
 
 namespace ThermoTray;
 
+/// <summary>
+/// 負責管理 Windows 系統工作列圖示 (NotifyIcon) 之繪製、更新、選單與事件處理的服務類別。
+/// 為 CPU 與 GPU 分別提供獨立的雙行（使用率與溫度）圖示。
+/// </summary>
 public sealed class TrayIconService : IDisposable
 {
     /// <summary>
-    /// Em size for the glyph outlines. The outline is scaled to whatever line it has to fill, so this
-    /// only decides how much detail that outline carries into the scaling.
+    /// 字型向量外框的 Em 大小。外框會被自動縮放以精確填滿文字繪製區域。
     /// </summary>
     private const float OutlineEmSize = 64f;
 
     private static readonly FontFamily IconFontFamily = new("Segoe UI");
 
-    /// <summary>Typographic layout adds no padding around the glyphs, so the outline is the ink itself.</summary>
+    /// <summary>
+    /// 使用 GenericTypographic 格式，取消字體預設內距，以真實字形外框作為繪製邊界。
+    /// </summary>
     private static readonly StringFormat OutlineFormat = StringFormat.GenericTypographic;
 
-    // Every drawing object above and below owns a GDI+ handle and outlives each icon drawn with it. An
-    // icon is redrawn whenever its digits change, so creating them per redraw would churn handles all
-    // day for a fixed and very small set of objects. Only the UI thread touches them.
+    // GDI+ 畫筆快取物件，避免每次紅繪時重複建立與銷毀造成控制代碼浪費
     private static readonly SolidBrush UsageBrush = new(Color.FromArgb(245, 247, 250));
     private static readonly SolidBrush CpuBrush = new(Color.FromArgb(85, 214, 190));
     private static readonly SolidBrush GpuBrush = new(Color.FromArgb(116, 176, 255));
@@ -35,13 +38,20 @@ public sealed class TrayIconService : IDisposable
     private string? _gpuIconKey;
     private bool _disposed;
 
+    /// <summary>
+    /// 初始化 TrayIconService 的新實例。
+    /// </summary>
+    /// <param name="viewModel">提供狀態資料的 View Model。</param>
+    /// <param name="showMainWindow">顯示主視窗的回調委派。</param>
+    /// <param name="exitApplication">結束應用程式的回調委派。</param>
     public TrayIconService(MainViewModel viewModel, Action showMainWindow, Action exitApplication)
     {
         _viewModel = viewModel;
         _showMainWindow = showMainWindow;
         _exitApplication = exitApplication;
-        // The notification area puts the most recently registered icon leftmost, so register
-        // GPU first to end up with CPU on the left and GPU on the right.
+
+        // 系統匣區域會將最新註冊的圖示放在最左側，因此先註冊 GPU 再註冊 CPU，
+        // 最終排版呈現為 CPU 在左、GPU 在右。
         _gpuNotifyIcon = CreateNotifyIcon();
         _cpuNotifyIcon = CreateNotifyIcon();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -49,6 +59,9 @@ public sealed class TrayIconService : IDisposable
         UpdateGpuIcon();
     }
 
+    /// <summary>
+    /// 建立 NotifyIcon 控制項並綁定雙擊事件與快顯功能表。
+    /// </summary>
     private Forms.NotifyIcon CreateNotifyIcon()
     {
         var icon = new Forms.NotifyIcon
@@ -60,6 +73,9 @@ public sealed class TrayIconService : IDisposable
         return icon;
     }
 
+    /// <summary>
+    /// 建立圖示右鍵快顯功能表 (Open / Exit)。
+    /// </summary>
     private Forms.ContextMenuStrip BuildMenu()
     {
         var menu = new Forms.ContextMenuStrip();
@@ -69,9 +85,11 @@ public sealed class TrayIconService : IDisposable
         return menu;
     }
 
+    /// <summary>
+    /// 監聽 ViewModel 屬性變更，當讀值或語言改變時更新對應圖示。
+    /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        // A null or empty name is the conventional "everything changed" signal.
         var everythingChanged = string.IsNullOrEmpty(e.PropertyName);
 
         if (everythingChanged || e.PropertyName is nameof(MainViewModel.CpuTemperature)
@@ -98,6 +116,9 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
+    /// <summary>
+    /// 更新右鍵功能表項目（如切換語言時更新文字）。
+    /// </summary>
     private void ReplaceMenu(Forms.NotifyIcon notifyIcon)
     {
         var oldMenu = notifyIcon.ContextMenuStrip;
@@ -105,6 +126,9 @@ public sealed class TrayIconService : IDisposable
         oldMenu?.Dispose();
     }
 
+    /// <summary>
+    /// 更新 CPU 圖示與 Tooltip 提示文字。
+    /// </summary>
     private void UpdateCpuIcon()
     {
         if (_disposed)
@@ -116,7 +140,6 @@ public sealed class TrayIconService : IDisposable
         var usageDigits = _viewModel.CpuUsageTrayDigits;
         var temperatureDigits = _viewModel.CpuTrayDigits;
 
-        // The size belongs in the key so that a change of display scale redraws at the new size.
         var iconKey = $"{iconSize}|{usageDigits}|{temperatureDigits}";
         if (!string.Equals(iconKey, _cpuIconKey, StringComparison.Ordinal))
         {
@@ -127,6 +150,9 @@ public sealed class TrayIconService : IDisposable
         _cpuNotifyIcon.Text = BuildTooltip("CpuUsage", _viewModel.CpuUsage, "CpuTemperature", _viewModel.CpuTemperature);
     }
 
+    /// <summary>
+    /// 更新 GPU 圖示與 Tooltip 提示文字。
+    /// </summary>
     private void UpdateGpuIcon()
     {
         if (_disposed)
@@ -154,12 +180,14 @@ public sealed class TrayIconService : IDisposable
         _gpuNotifyIcon.Text = BuildTooltip("GpuUsage", _viewModel.GpuUsage, "GpuTemperature", _viewModel.GpuTemperature);
     }
 
+    /// <summary>
+    /// 組合圖示提示（Tooltip）文字。
+    /// </summary>
     private string BuildTooltip(string usageLabel, string usage, string temperatureLabel, string temperature) =>
         $"{_viewModel.T[usageLabel]}: {usage} | {_viewModel.T[temperatureLabel]}: {temperature}";
 
     /// <summary>
-    /// The notification area's own icon metric, which follows the display scale. Drawing for this size
-    /// rather than a fixed one is what keeps Windows from resampling the finished icon a second time.
+    /// 依據系統縮放比例取得工作列圖示的目標像素尺寸。
     /// </summary>
     private static int GetTrayIconSize()
     {
@@ -168,6 +196,9 @@ public sealed class TrayIconService : IDisposable
         return side >= TrayIconLayout.MinimumIconSize ? side : TrayIconLayout.MinimumIconSize;
     }
 
+    /// <summary>
+    /// 重新生成 Icon 並替換既有圖示，並妥善釋放舊 Icon 物件。
+    /// </summary>
     private static void ReplaceIcon(
         Forms.NotifyIcon notifyIcon,
         string usageDigits,
@@ -180,17 +211,29 @@ public sealed class TrayIconService : IDisposable
         oldIcon?.Dispose();
     }
 
+    /// <summary>
+    /// 建立包含位元圖與 Win32 Icon 控制代碼的硬體圖示，確保原生 HICON 被確實銷毀。
+    /// </summary>
     private static Icon CreateHardwareIcon(string usageDigits, string temperatureDigits, Brush temperatureBrush, int iconSize)
     {
         using var bitmap = CreateIconBitmap(usageDigits, temperatureDigits, temperatureBrush, iconSize);
         var iconHandle = bitmap.GetHicon();
-        using var temporaryIcon = Icon.FromHandle(iconHandle);
-        var icon = (Icon)temporaryIcon.Clone();
-        _ = DestroyIcon(iconHandle);
-        return icon;
+
+        try
+        {
+            using var temporaryIcon = Icon.FromHandle(iconHandle);
+            return (Icon)temporaryIcon.Clone();
+        }
+        finally
+        {
+            // Clone 建立獨立 Icon 物件後，必須強制銷毀原生的 Win32 HICON控制代碼，防止記憶體與控制代碼洩漏
+            _ = DestroyIcon(iconHandle);
+        }
     }
 
-    /// <summary>Draws unitless digits, utilization above temperature, as large as the icon allows.</summary>
+    /// <summary>
+    /// 繪製包含使用率（上方）與溫度（下方）的雙行文字 Icon 位元圖。
+    /// </summary>
     internal static Bitmap CreateIconBitmap(string usageDigits, string temperatureDigits, Brush temperatureBrush, int iconSize)
     {
         var canvasSize = TrayIconLayout.GetCanvasSize(iconSize);
@@ -218,17 +261,13 @@ public sealed class TrayIconService : IDisposable
     }
 
     /// <summary>
-    /// Scales the glyph outline itself so the digits fill their line exactly. Sizing a font instead can
-    /// only bound the advance width, which says nothing about how tall the digits are or whether they
-    /// still fit once the smallest allowed size is reached, and anything that does not fit is cut off
-    /// rather than shrunk: a reading of 100 was drawn, and read, as 10.
+    /// 精確縮放向量字形路徑 (GraphicsPath)，使其完美填滿目標行矩形範圍，防止數字超出邊界或被裁切。
     /// </summary>
     private static void DrawDigits(Graphics graphics, string digits, Brush brush, RectangleF line)
     {
         using var path = new GraphicsPath();
         path.AddString(digits, IconFontFamily, (int)FontStyle.Bold, OutlineEmSize, PointF.Empty, OutlineFormat);
 
-        // A string of nothing but spaces, and a font missing every glyph, both produce an empty outline.
         var ink = path.GetBounds();
         if (ink.Width <= 0f || ink.Height <= 0f)
         {
@@ -245,6 +284,9 @@ public sealed class TrayIconService : IDisposable
         graphics.FillPath(brush, path);
     }
 
+    /// <summary>
+    /// 釋放系統匣圖示資源與解綁事件。
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)
@@ -258,6 +300,9 @@ public sealed class TrayIconService : IDisposable
         DisposeNotifyIcon(_gpuNotifyIcon);
     }
 
+    /// <summary>
+    /// 隱藏並處置指定的 NotifyIcon 物件。
+    /// </summary>
     private static void DisposeNotifyIcon(Forms.NotifyIcon notifyIcon)
     {
         notifyIcon.Visible = false;
