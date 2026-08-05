@@ -32,9 +32,8 @@ public sealed class HardwareSensorService : IDisposable
     // 在拓撲掃描時快取感測器與優先級，避免每次採樣時重新進行字串匹配
     private IHardware[] _hardware = [];
     private CpuCandidate[] _cpuCandidates = [];
-    private GpuCandidate[] _gpuCandidates = [];
+    private GpuDeviceCandidate[] _gpuDevices = [];
     private CpuCandidate[] _cpuUsageCandidates = [];
-    private GpuUsageCandidate[] _gpuUsageCandidates = [];
 
     // 由 LibreHardwareMonitor 事件觸發的硬體變更標記
     private volatile bool _topologyChanged;
@@ -59,9 +58,8 @@ public sealed class HardwareSensorService : IDisposable
 
         return new HardwareSnapshot(
             SelectCpuReading(),
-            SelectGpuReading(),
             SelectCpuUsage(),
-            SelectGpuUsage());
+            SelectGpuReadings());
     }
 
     /// <summary>
@@ -146,18 +144,35 @@ public sealed class HardwareSensorService : IDisposable
             _hardware = roots;
 
             var cpuCandidates = new List<CpuCandidate>();
-            var gpuCandidates = new List<GpuCandidate>();
             var cpuUsageCandidates = new List<CpuCandidate>();
-            var gpuUsageCandidates = new List<GpuUsageCandidate>();
+            var gpuBuilders = new List<GpuDeviceBuilder>();
+            var gpuBuildersByHardware = new Dictionary<IHardware, GpuDeviceBuilder>(ReferenceEqualityComparer.Instance);
             foreach (var root in roots)
             {
-                CollectCandidates(root, cpuCandidates, gpuCandidates, cpuUsageCandidates, gpuUsageCandidates);
+                CollectCandidates(
+                    root,
+                    cpuCandidates,
+                    cpuUsageCandidates,
+                    gpuBuilders,
+                    gpuBuildersByHardware,
+                    gpuHardware: null);
             }
 
             _cpuCandidates = cpuCandidates.ToArray();
-            _gpuCandidates = gpuCandidates.ToArray();
             _cpuUsageCandidates = cpuUsageCandidates.ToArray();
-            _gpuUsageCandidates = gpuUsageCandidates.ToArray();
+
+            var gpuDevices = new GpuDeviceCandidate[gpuBuilders.Count];
+            for (var index = 0; index < gpuBuilders.Count; index++)
+            {
+                var builder = gpuBuilders[index];
+                gpuDevices[index] = new GpuDeviceCandidate(
+                    $"{builder.Hardware.HardwareType}:{builder.Hardware.Name}:{index}",
+                    builder.Hardware.Name,
+                    builder.TemperatureCandidates.ToArray(),
+                    builder.UsageCandidates.ToArray());
+            }
+
+            _gpuDevices = gpuDevices;
         }
         catch
         {
@@ -173,9 +188,10 @@ public sealed class HardwareSensorService : IDisposable
     private void CollectCandidates(
         IHardware hardware,
         List<CpuCandidate> cpuCandidates,
-        List<GpuCandidate> gpuCandidates,
         List<CpuCandidate> cpuUsageCandidates,
-        List<GpuUsageCandidate> gpuUsageCandidates)
+        List<GpuDeviceBuilder> gpuBuilders,
+        Dictionary<IHardware, GpuDeviceBuilder> gpuBuildersByHardware,
+        IHardware? gpuHardware)
     {
         hardware.SensorAdded -= _onSensorChanged;
         hardware.SensorAdded += _onSensorChanged;
@@ -184,9 +200,20 @@ public sealed class HardwareSensorService : IDisposable
 
         var isCpu = hardware.HardwareType == HardwareType.Cpu;
         var isGpu = hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
-        var hardwarePriority = hardware.HardwareType == HardwareType.GpuIntel
+        var currentGpuHardware = isGpu ? hardware : gpuHardware;
+        var hardwarePriority = currentGpuHardware?.HardwareType == HardwareType.GpuIntel
             ? GpuSensorRank.IntegratedPriority
             : GpuSensorRank.DiscretePriority;
+        GpuDeviceBuilder? gpuBuilder = null;
+        if (currentGpuHardware is not null)
+        {
+            if (!gpuBuildersByHardware.TryGetValue(currentGpuHardware, out gpuBuilder))
+            {
+                gpuBuilder = new GpuDeviceBuilder(currentGpuHardware);
+                gpuBuildersByHardware.Add(currentGpuHardware, gpuBuilder);
+                gpuBuilders.Add(gpuBuilder);
+            }
+        }
 
         foreach (var sensor in hardware.Sensors)
         {
@@ -198,10 +225,10 @@ public sealed class HardwareSensorService : IDisposable
                 {
                     cpuCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuPreferredNames)));
                 }
-                else if (isGpu)
+                else if (gpuBuilder is not null)
                 {
-                    var sequence = gpuCandidates.Count;
-                    gpuCandidates.Add(new GpuCandidate(
+                    var sequence = gpuBuilder.TemperatureCandidates.Count;
+                    gpuBuilder.TemperatureCandidates.Add(new GpuCandidate(
                         hardware,
                         sensor,
                         new GpuSensorRank(GetPreferredRank(sensor.Name, GpuPreferredNames), hardwarePriority, sequence),
@@ -214,10 +241,10 @@ public sealed class HardwareSensorService : IDisposable
                 {
                     cpuUsageCandidates.Add(new CpuCandidate(hardware, sensor, GetPreferredRank(sensor.Name, CpuUsagePreferredNames)));
                 }
-                else if (isGpu)
+                else if (gpuBuilder is not null)
                 {
-                    var sequence = gpuUsageCandidates.Count;
-                    gpuUsageCandidates.Add(new GpuUsageCandidate(
+                    var sequence = gpuBuilder.UsageCandidates.Count;
+                    gpuBuilder.UsageCandidates.Add(new GpuUsageCandidate(
                         hardware,
                         sensor,
                         new GpuSensorRank(GetPreferredRank(sensor.Name, GpuUsagePreferredNames), hardwarePriority, sequence)));
@@ -227,7 +254,13 @@ public sealed class HardwareSensorService : IDisposable
 
         foreach (var subHardware in hardware.SubHardware)
         {
-            CollectCandidates(subHardware, cpuCandidates, gpuCandidates, cpuUsageCandidates, gpuUsageCandidates);
+            CollectCandidates(
+                subHardware,
+                cpuCandidates,
+                cpuUsageCandidates,
+                gpuBuilders,
+                gpuBuildersByHardware,
+                currentGpuHardware);
         }
     }
 
@@ -275,39 +308,6 @@ public sealed class HardwareSensorService : IDisposable
     }
 
     /// <summary>
-    /// 從 GPU 候選者中評選最佳溫度讀值（獨顯優先於內顯，符合名稱者優先）。
-    /// </summary>
-    private TemperatureReading SelectGpuReading()
-    {
-        SensorCandidate preferred = default;
-        var preferredRank = GpuSensorRank.None;
-        SensorCandidate fallback = default;
-        var fallbackRank = GpuSensorRank.None;
-
-        foreach (var candidate in _gpuCandidates)
-        {
-            if (!TryGetTemperature(candidate.Sensor, GpuMinimumCelsius, GpuMaximumCelsius, out var celsius))
-            {
-                continue;
-            }
-
-            if (candidate.PreferredRank.IsBetterThan(preferredRank))
-            {
-                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
-                preferredRank = candidate.PreferredRank;
-            }
-
-            if (candidate.FallbackRank.IsBetterThan(fallbackRank))
-            {
-                fallback = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
-                fallbackRank = candidate.FallbackRank;
-            }
-        }
-
-        return ToReading(preferred.IsValid ? preferred : fallback);
-    }
-
-    /// <summary>
     /// 評選 CPU 總使用率讀值。
     /// </summary>
     private UtilizationReading SelectCpuUsage()
@@ -333,14 +333,66 @@ public sealed class HardwareSensorService : IDisposable
     }
 
     /// <summary>
-    /// 評選 GPU 使用率讀值。
+    /// 逐張 GPU 評選最佳溫度與使用率，確保兩種讀值來自同一個實體裝置。
     /// </summary>
-    private UtilizationReading SelectGpuUsage()
+    private IReadOnlyList<GpuReading> SelectGpuReadings()
+    {
+        var readings = new GpuReading[_gpuDevices.Length];
+        for (var index = 0; index < _gpuDevices.Length; index++)
+        {
+            var device = _gpuDevices[index];
+            readings[index] = new GpuReading(
+                device.Id,
+                device.Name,
+                SelectGpuTemperature(device.TemperatureCandidates),
+                SelectGpuUsage(device.UsageCandidates));
+        }
+
+        return readings;
+    }
+
+    /// <summary>
+    /// 從單一 GPU 的候選者中評選最佳溫度讀值。
+    /// </summary>
+    private TemperatureReading SelectGpuTemperature(IReadOnlyList<GpuCandidate> candidates)
+    {
+        SensorCandidate preferred = default;
+        var preferredRank = GpuSensorRank.None;
+        SensorCandidate fallback = default;
+        var fallbackRank = GpuSensorRank.None;
+
+        foreach (var candidate in candidates)
+        {
+            if (!TryGetTemperature(candidate.Sensor, GpuMinimumCelsius, GpuMaximumCelsius, out var celsius))
+            {
+                continue;
+            }
+
+            if (candidate.PreferredRank.IsBetterThan(preferredRank))
+            {
+                preferred = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+                preferredRank = candidate.PreferredRank;
+            }
+
+            if (candidate.FallbackRank.IsBetterThan(fallbackRank))
+            {
+                fallback = new SensorCandidate(candidate.Hardware, candidate.Sensor, celsius);
+                fallbackRank = candidate.FallbackRank;
+            }
+        }
+
+        return ToReading(preferred.IsValid ? preferred : fallback);
+    }
+
+    /// <summary>
+    /// 從單一 GPU 的候選者中評選最佳使用率讀值。
+    /// </summary>
+    private UtilizationReading SelectGpuUsage(IReadOnlyList<GpuUsageCandidate> candidates)
     {
         SensorCandidate preferred = default;
         var preferredRank = GpuSensorRank.None;
 
-        foreach (var candidate in _gpuUsageCandidates)
+        foreach (var candidate in candidates)
         {
             if (!TryGetUsage(candidate.Sensor, out var percent))
             {
@@ -422,7 +474,10 @@ public sealed class HardwareSensorService : IDisposable
             return TemperatureReading.Unavailable;
         }
 
-        return new TemperatureReading(decimal.Round((decimal)candidate.Value, 1), GetSourceName(candidate));
+        return new TemperatureReading(
+            decimal.Round((decimal)candidate.Value, 1),
+            GetSourceName(candidate),
+            candidate.Hardware!.Name);
     }
 
     /// <summary>
@@ -435,7 +490,10 @@ public sealed class HardwareSensorService : IDisposable
             return UtilizationReading.Unavailable;
         }
 
-        return new UtilizationReading(decimal.Round((decimal)candidate.Value, 1), GetSourceName(candidate));
+        return new UtilizationReading(
+            decimal.Round((decimal)candidate.Value, 1),
+            GetSourceName(candidate),
+            candidate.Hardware!.Name);
     }
 
     /// <summary>
@@ -496,9 +554,8 @@ public sealed class HardwareSensorService : IDisposable
         _computer.Close();
         _hardware = [];
         _cpuCandidates = [];
-        _gpuCandidates = [];
+        _gpuDevices = [];
         _cpuUsageCandidates = [];
-        _gpuUsageCandidates = [];
         _sourceNames.Clear();
         _opened = false;
     }
@@ -529,6 +586,27 @@ public sealed class HardwareSensorService : IDisposable
         IHardware Hardware,
         ISensor Sensor,
         GpuSensorRank PreferredRank);
+
+    /// <summary>
+    /// 拓撲掃描期間暫存單一實體 GPU 的所有候選感測器。
+    /// </summary>
+    private sealed class GpuDeviceBuilder(IHardware hardware)
+    {
+        public IHardware Hardware { get; } = hardware;
+
+        public List<GpuCandidate> TemperatureCandidates { get; } = [];
+
+        public List<GpuUsageCandidate> UsageCandidates { get; } = [];
+    }
+
+    /// <summary>
+    /// 拓撲掃描完成後快取的單一 GPU 候選感測器集合。
+    /// </summary>
+    private readonly record struct GpuDeviceCandidate(
+        string Id,
+        string Name,
+        GpuCandidate[] TemperatureCandidates,
+        GpuUsageCandidate[] UsageCandidates);
 
     private readonly record struct SensorCandidate(IHardware? Hardware, ISensor? Sensor, float Value)
     {

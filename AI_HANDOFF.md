@@ -241,3 +241,30 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - The first local ZIP command failed because `Compress-Archive` received `FileInfo` objects instead of full paths; no product failure was indicated. Re-running with explicit full paths succeeded: installer `artifacts\\release\\ThermoTray-Setup-1.1.4.exe` is 53,992,887 bytes with SHA-256 `72DC90703E5F6F637F916A7EB2C1D70CED40EDB40F1E8052F1A0BECC13D472AB`; portable ZIP is 73,804,923 bytes with SHA-256 `FBA7485DB57BF2C4C27A329B4AEF847CDAC5B1253474EF356394CEB5703CBFCE`; the ZIP contains 8 files and no PDB.
 - Pushed branch `agent/release-1.1.4` at commit `76665a3` and opened draft PR #3. GitHub Actions release run `30962293962` passed every build, test, format, publish, manifest, installer, archive, and release step.
 - Published formal GitHub Release `v1.1.4` at `https://github.com/nojackno2-ctrl/ThermoTray/releases/tag/v1.1.4`. Downloaded remote assets were rehashed successfully: installer `53,994,651` bytes, SHA-256 `D9F0EBCCB2B6137DCCA8C6A46188BCFB38A798A67B5F7011206617E818124808`; portable ZIP `76,249,140` bytes, SHA-256 `EBDDA19A879F9F25455CDF2EE8989B497F83A606D60FC40552EAC33FD1D3268F`.
+
+## 2026-08-05 dual-GPU utilization investigation
+
+- The user reported that GPU utilization is ambiguous when the machine has both an NVIDIA dGPU and an AMD integrated GPU. The current `HardwareSensorService` ranks all GPU temperature sensors globally and all GPU load sensors globally, so the selected utilization and temperature can come from different physical GPUs; the screenshot shows 5% utilization while the source label is NVIDIA, matching this defect.
+- Planned fix: retain GPU identity through the reading pipeline, pair temperature and load by `IHardware`, and expose one view-model card per readable GPU so each device has its own utilization, temperature, and source label. Live hardware verification remains pending.
+- Implemented: `HardwareSensorService` now builds one candidate group per GPU hardware and returns `GpuReading` entries with paired temperature/load values; `MainViewModel` exposes an independent `GpuViewModel` for every entry; `MainWindow` renders a dynamic card for each GPU; `TrayIconService` creates and updates one independent GPU icon per entry with GPU number/device-name tooltips. The former single-GPU properties were removed, and the UI test fixture now covers NVIDIA + AMD cards.
+- Validation after the implementation: `dotnet build ThermoTray.sln --configuration Release --no-restore` passed with 0 warnings/errors; `dotnet test ThermoTray.sln --configuration Release --no-build` passed 137/137. Live dual-GPU readings and final visual tray ordering remain pending manual launch on the user's machine.
+- Final local validation after the README and ranking cleanup: Release build passed with 0 warnings/errors; all 137 tests passed; `dotnet format ThermoTray.sln --verify-no-changes --no-restore --verbosity minimal` passed; `git diff --check` passed. No commit or push was performed.
+
+## 2026-08-05 card headings and tray field visibility
+
+- Implemented the user's request to move device names to the top of each CPU/GPU card. CPU readings now carry the hardware name separately from the sensor source label; the source line below the values contains only the sensor name.
+- Added independent persisted notification-area visibility choices for CPU utilization, CPU temperature, and each GPU's utilization and temperature. Existing settings default to showing every field; GPU choices are keyed by the stable GPU hardware ID.
+- The cards keep showing all live values regardless of these choices. Tray icons hide unchecked lines, hide the whole icon when both lines are unchecked, and tooltips list only selected values while retaining device identification.
+- Added 3 regression tests, bringing the local total to 140. Release `dotnet test --no-restore` passed 140/140; `dotnet format --verify-no-changes --no-restore` and `git diff --check` passed. No commit or push was performed.
+- Elevated live UI and notification-area visual verification remains pending; the user must launch the updated publish/installer build to confirm the final arrangement on the actual display.
+
+## 2026-08-05 GPU device-name duplication fix
+
+- The user reported that GPU names appeared twice in the card. The top line already showed `DeviceName`, while the bottom `Source` line still contained `DeviceName • GPU Core`.
+- `GpuViewModel` now strips the hardware-name prefix from the source line, matching the CPU card behavior; the card keeps the top device name and the `GPU 0/1` identifier.
+- Added a regression test for the source text. Release `dotnet test --no-restore` passed 141/141; final visual verification remains pending manual launch.
+
+## 2026-08-05 local branch integration
+
+- Fast-forwarded the local `main` branch from `b8625f7` to `0407c60`, integrating the committed `agent/release-1.1.4` release work without creating an unnecessary merge commit.
+- The working tree still contains the existing uncommitted GPU/card changes and was not staged, committed, stashed, or discarded. `origin/main` remains at `b8625f7`; no remote push was performed.
