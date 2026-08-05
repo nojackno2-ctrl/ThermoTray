@@ -29,29 +29,84 @@
       <TextBlock Text="{Binding T[Subtitle]}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" />
     </StackPanel>
 
-    <!-- UniformGrid ignores collapsed children, so the CPU card fills the row on a machine with no readable GPU. -->
+    <!-- UniformGrid ignores the collapsed GPU collection, so the CPU card fills the row on a machine with no readable GPU. -->
     <primitives:UniformGrid Grid.Row="1" Rows="1" Margin="0,26,0,20">
       <Border x:Name="CpuCard" Background="{StaticResource CardBrush}" CornerRadius="12" Padding="20" Margin="0,0,9,0">
         <StackPanel>
-          <TextBlock Text="{Binding T[CpuUsage]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+          <TextBlock Text="{Binding CpuDeviceName}" Foreground="{StaticResource AccentBrush}"
+                     FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12" />
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding T[CpuUsage]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+            <CheckBox Grid.Column="1" Content="{Binding T[ShowInTray]}"
+                      IsChecked="{Binding ShowCpuUsageInTray, Mode=TwoWay}"
+                      FontSize="11" HorizontalAlignment="Right" />
+          </Grid>
           <TextBlock Text="{Binding CpuUsage}" Foreground="{StaticResource ControlTextBrush}" FontSize="27" FontWeight="SemiBold" Margin="0,5,0,8" />
-          <TextBlock Text="{Binding T[CpuTemperature]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding T[CpuTemperature]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+            <CheckBox Grid.Column="1" Content="{Binding T[ShowInTray]}"
+                      IsChecked="{Binding ShowCpuTemperatureInTray, Mode=TwoWay}"
+                      FontSize="11" HorizontalAlignment="Right" />
+          </Grid>
           <TextBlock Text="{Binding CpuTemperature}" Foreground="{StaticResource AccentBrush}" FontSize="38" FontWeight="SemiBold" Margin="0,5,0,4" />
-          <!-- A device name is longer than any card is wide, so it wraps instead of ending mid-word.
-               Nothing here caps its height: the window grows to fit whatever the machine reports. -->
-          <TextBlock Text="{Binding CpuSource}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding CpuSource}" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
-      <Border x:Name="GpuCard" Background="{StaticResource CardBrush}" CornerRadius="12" Padding="20" Margin="9,0,0,0"
-              Visibility="{Binding IsGpuPresent, Converter={StaticResource BooleanToVisibilityConverter}}">
-        <StackPanel>
-          <TextBlock Text="{Binding T[GpuUsage]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
-          <TextBlock Text="{Binding GpuUsage}" Foreground="{StaticResource ControlTextBrush}" FontSize="27" FontWeight="SemiBold" Margin="0,5,0,8" />
-          <TextBlock Text="{Binding T[GpuTemperature]}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
-          <TextBlock Text="{Binding GpuTemperature}" Foreground="{StaticResource GpuAccentBrush}" FontSize="38" FontWeight="SemiBold" Margin="0,5,0,4" />
-          <TextBlock Text="{Binding GpuSource}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
-        </StackPanel>
-      </Border>
+      <ItemsControl x:Name="GpuCards"
+                    ItemsSource="{Binding Gpus}"
+                    Margin="9,0,0,0"
+                    Visibility="{Binding IsGpuPresent, Converter={StaticResource BooleanToVisibilityConverter}}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Background="{StaticResource CardBrush}" CornerRadius="12" Padding="20" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="{Binding DeviceName}" Foreground="{StaticResource GpuAccentBrush}"
+                           FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource MutedBrush}"
+                           FontSize="13" Margin="0,2,0,10" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding UsageLabel}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+                  <CheckBox Grid.Column="1" Content="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
+                            IsChecked="{Binding ShowUsageInTray, Mode=TwoWay}"
+                            FontSize="11" HorizontalAlignment="Right" />
+                </Grid>
+                <TextBlock Text="{Binding Usage}" Foreground="{StaticResource ControlTextBrush}"
+                           FontSize="27" FontWeight="SemiBold" Margin="0,5,0,8" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding TemperatureLabel}" Foreground="{StaticResource MutedBrush}" FontSize="15" />
+                  <CheckBox Grid.Column="1" Content="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
+                            IsChecked="{Binding ShowTemperatureInTray, Mode=TwoWay}"
+                            FontSize="11" HorizontalAlignment="Right" />
+                </Grid>
+                <TextBlock Text="{Binding Temperature}" Foreground="{StaticResource GpuAccentBrush}"
+                           FontSize="38" FontWeight="SemiBold" Margin="0,5,0,4" />
+                <TextBlock Text="{Binding Source}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </primitives:UniformGrid>
 
     <StackPanel Grid.Row="2">

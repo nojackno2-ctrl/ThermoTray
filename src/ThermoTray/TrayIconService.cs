@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -32,10 +33,9 @@ public sealed class TrayIconService : IDisposable
     private readonly MainViewModel _viewModel;
     private readonly Action _showMainWindow;
     private readonly Action _exitApplication;
-    private readonly Forms.NotifyIcon _cpuNotifyIcon;
-    private readonly Forms.NotifyIcon _gpuNotifyIcon;
+    private Forms.NotifyIcon _cpuNotifyIcon;
+    private readonly List<GpuTrayIcon> _gpuIcons = [];
     private string? _cpuIconKey;
-    private string? _gpuIconKey;
     private bool _disposed;
 
     /// <summary>
@@ -50,13 +50,12 @@ public sealed class TrayIconService : IDisposable
         _showMainWindow = showMainWindow;
         _exitApplication = exitApplication;
 
-        // 系統匣區域會將最新註冊的圖示放在最左側，因此先註冊 GPU 再註冊 CPU，
-        // 最終排版呈現為 CPU 在左、GPU 在右。
-        _gpuNotifyIcon = CreateNotifyIcon();
         _cpuNotifyIcon = CreateNotifyIcon();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ((INotifyCollectionChanged)_viewModel.Gpus).CollectionChanged += OnGpuCollectionChanged;
+        RebuildGpuIcons(restoreCpuOrder: false);
         UpdateCpuIcon();
-        UpdateGpuIcon();
+        UpdateGpuIcons();
     }
 
     /// <summary>
@@ -95,25 +94,91 @@ public sealed class TrayIconService : IDisposable
         if (everythingChanged || e.PropertyName is nameof(MainViewModel.CpuTemperature)
             or nameof(MainViewModel.CpuTrayDigits)
             or nameof(MainViewModel.CpuUsage)
-            or nameof(MainViewModel.CpuUsageTrayDigits))
+            or nameof(MainViewModel.CpuUsageTrayDigits)
+            or nameof(MainViewModel.CpuDeviceName)
+            or nameof(MainViewModel.ShowCpuUsageInTray)
+            or nameof(MainViewModel.ShowCpuTemperatureInTray))
         {
             UpdateCpuIcon();
         }
 
-        if (everythingChanged || e.PropertyName is nameof(MainViewModel.GpuTemperature)
-            or nameof(MainViewModel.GpuTrayDigits)
-            or nameof(MainViewModel.GpuUsage)
-            or nameof(MainViewModel.GpuUsageTrayDigits)
-            or nameof(MainViewModel.IsGpuPresent))
+        if (everythingChanged || e.PropertyName is nameof(MainViewModel.IsGpuPresent))
         {
-            UpdateGpuIcon();
+            UpdateGpuIcons();
         }
 
         if (everythingChanged)
         {
             ReplaceMenu(_cpuNotifyIcon);
-            ReplaceMenu(_gpuNotifyIcon);
+            foreach (var entry in _gpuIcons)
+            {
+                ReplaceMenu(entry.NotifyIcon);
+            }
         }
+    }
+
+    /// <summary>
+    /// 當 GPU 清單增減時重建對應的獨立系統匣圖示。
+    /// </summary>
+    private void OnGpuCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        RebuildGpuIcons(restoreCpuOrder: true);
+    }
+
+    /// <summary>
+    /// 當單一 GPU 的使用率、溫度或語言標籤更新時刷新該 GPU 圖示。
+    /// </summary>
+    private void OnGpuPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_disposed || sender is not GpuViewModel gpu)
+        {
+            return;
+        }
+
+        foreach (var entry in _gpuIcons)
+        {
+            if (ReferenceEquals(entry.Gpu, gpu))
+            {
+                UpdateGpuIcon(entry);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 依目前 GPU 清單建立每張 GPU 的獨立圖示。
+    /// </summary>
+    private void RebuildGpuIcons(bool restoreCpuOrder)
+    {
+        foreach (var entry in _gpuIcons)
+        {
+            entry.Gpu.PropertyChanged -= OnGpuPropertyChanged;
+            DisposeNotifyIcon(entry.NotifyIcon);
+        }
+
+        _gpuIcons.Clear();
+        foreach (var gpu in _viewModel.Gpus)
+        {
+            gpu.PropertyChanged += OnGpuPropertyChanged;
+            _gpuIcons.Add(new GpuTrayIcon(gpu, CreateNotifyIcon()));
+        }
+
+        if (restoreCpuOrder && _gpuIcons.Count > 0)
+        {
+            // Windows 通常把較晚註冊的圖示放在左側；GPU 清單初次出現後重新註冊 CPU，
+            // 讓預設順序維持 CPU 在左、各張 GPU 依序在右（使用者手動排列仍由 Windows 記憶）。
+            var oldCpuIcon = _cpuNotifyIcon;
+            _cpuNotifyIcon = CreateNotifyIcon();
+            DisposeNotifyIcon(oldCpuIcon);
+        }
+
+        UpdateCpuIcon();
+        UpdateGpuIcons();
     }
 
     /// <summary>
@@ -136,55 +201,121 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        var iconSize = GetTrayIconSize();
-        var usageDigits = _viewModel.CpuUsageTrayDigits;
-        var temperatureDigits = _viewModel.CpuTrayDigits;
+        var showUsage = _viewModel.ShowCpuUsageInTray;
+        var showTemperature = _viewModel.ShowCpuTemperatureInTray;
+        _cpuNotifyIcon.Visible = showUsage || showTemperature;
+        if (!_cpuNotifyIcon.Visible)
+        {
+            return;
+        }
 
-        var iconKey = $"{iconSize}|{usageDigits}|{temperatureDigits}";
+        var iconSize = GetTrayIconSize();
+        var usageDigits = showUsage ? _viewModel.CpuUsageTrayDigits : string.Empty;
+        var temperatureDigits = showTemperature ? _viewModel.CpuTrayDigits : string.Empty;
+
+        var iconKey = $"{iconSize}|{showUsage}|{usageDigits}|{showTemperature}|{temperatureDigits}";
         if (!string.Equals(iconKey, _cpuIconKey, StringComparison.Ordinal))
         {
             ReplaceIcon(_cpuNotifyIcon, usageDigits, temperatureDigits, CpuBrush, iconSize);
             _cpuIconKey = iconKey;
         }
 
-        _cpuNotifyIcon.Text = BuildTooltip("CpuUsage", _viewModel.CpuUsage, "CpuTemperature", _viewModel.CpuTemperature);
+        _cpuNotifyIcon.Text = BuildTooltip(
+            _viewModel.CpuDeviceName,
+            showUsage,
+            _viewModel.T["CpuUsage"],
+            _viewModel.CpuUsage,
+            showTemperature,
+            _viewModel.T["CpuTemperature"],
+            _viewModel.CpuTemperature);
     }
 
     /// <summary>
-    /// 更新 GPU 圖示與 Tooltip 提示文字。
+    /// 更新所有 GPU 圖示與各自的 Tooltip 提示文字。
     /// </summary>
-    private void UpdateGpuIcon()
+    private void UpdateGpuIcons()
     {
         if (_disposed)
         {
             return;
         }
 
-        _gpuNotifyIcon.Visible = _viewModel.IsGpuPresent;
-        if (!_viewModel.IsGpuPresent)
+        foreach (var entry in _gpuIcons)
+        {
+            UpdateGpuIcon(entry);
+        }
+    }
+
+    /// <summary>
+    /// 更新單一 GPU 圖示與 Tooltip 提示文字。
+    /// </summary>
+    private void UpdateGpuIcon(GpuTrayIcon entry)
+    {
+        var showUsage = entry.Gpu.ShowUsageInTray;
+        var showTemperature = entry.Gpu.ShowTemperatureInTray;
+        entry.NotifyIcon.Visible = _viewModel.IsGpuPresent && (showUsage || showTemperature);
+        if (!entry.NotifyIcon.Visible)
         {
             return;
         }
 
         var iconSize = GetTrayIconSize();
-        var usageDigits = _viewModel.GpuUsageTrayDigits;
-        var temperatureDigits = _viewModel.GpuTrayDigits;
+        var usageDigits = showUsage ? entry.Gpu.UsageTrayDigits : string.Empty;
+        var temperatureDigits = showTemperature ? entry.Gpu.TemperatureTrayDigits : string.Empty;
 
-        var iconKey = $"{iconSize}|{usageDigits}|{temperatureDigits}";
-        if (!string.Equals(iconKey, _gpuIconKey, StringComparison.Ordinal))
+        var iconKey = $"{iconSize}|{showUsage}|{usageDigits}|{showTemperature}|{temperatureDigits}";
+        if (!string.Equals(iconKey, entry.IconKey, StringComparison.Ordinal))
         {
-            ReplaceIcon(_gpuNotifyIcon, usageDigits, temperatureDigits, GpuBrush, iconSize);
-            _gpuIconKey = iconKey;
+            ReplaceIcon(entry.NotifyIcon, usageDigits, temperatureDigits, GpuBrush, iconSize);
+            entry.IconKey = iconKey;
         }
 
-        _gpuNotifyIcon.Text = BuildTooltip("GpuUsage", _viewModel.GpuUsage, "GpuTemperature", _viewModel.GpuTemperature);
+        entry.NotifyIcon.Text = BuildGpuTooltip(entry.Gpu, showUsage, showTemperature);
     }
 
     /// <summary>
     /// 組合圖示提示（Tooltip）文字。
     /// </summary>
-    private string BuildTooltip(string usageLabel, string usage, string temperatureLabel, string temperature) =>
-        $"{_viewModel.T[usageLabel]}: {usage} | {_viewModel.T[temperatureLabel]}: {temperature}";
+    private static string BuildTooltip(
+        string deviceName,
+        bool showUsage,
+        string usageLabel,
+        string usage,
+        bool showTemperature,
+        string temperatureLabel,
+        string temperature)
+    {
+        var tooltip = string.IsNullOrWhiteSpace(deviceName) ? "CPU" : deviceName;
+        if (showUsage)
+        {
+            tooltip += $" | {usageLabel}: {usage}";
+        }
+
+        if (showTemperature)
+        {
+            tooltip += $" | {temperatureLabel}: {temperature}";
+        }
+
+        return TrimTooltip(tooltip);
+    }
+
+    /// <summary>
+    /// 組合包含 GPU 序號與裝置名稱的獨立 Tooltip，避免雙 GPU 時無法辨識圖示所屬裝置。
+    /// </summary>
+    private static string BuildGpuTooltip(GpuViewModel gpu, bool showUsage, bool showTemperature)
+    {
+        return BuildTooltip(
+            $"{gpu.DisplayName}: {gpu.DeviceName}",
+            showUsage,
+            gpu.UsageLabel,
+            gpu.Usage,
+            showTemperature,
+            gpu.TemperatureLabel,
+            gpu.Temperature);
+    }
+
+    private static string TrimTooltip(string tooltip) =>
+        tooltip.Length <= 127 ? tooltip : $"{tooltip[..124]}...";
 
     /// <summary>
     /// 依據系統縮放比例取得工作列圖示的目標像素尺寸。
@@ -296,8 +427,15 @@ public sealed class TrayIconService : IDisposable
 
         _disposed = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ((INotifyCollectionChanged)_viewModel.Gpus).CollectionChanged -= OnGpuCollectionChanged;
         DisposeNotifyIcon(_cpuNotifyIcon);
-        DisposeNotifyIcon(_gpuNotifyIcon);
+        foreach (var entry in _gpuIcons)
+        {
+            entry.Gpu.PropertyChanged -= OnGpuPropertyChanged;
+            DisposeNotifyIcon(entry.NotifyIcon);
+        }
+
+        _gpuIcons.Clear();
     }
 
     /// <summary>
@@ -309,6 +447,18 @@ public sealed class TrayIconService : IDisposable
         notifyIcon.Icon?.Dispose();
         notifyIcon.ContextMenuStrip?.Dispose();
         notifyIcon.Dispose();
+    }
+
+    /// <summary>
+    /// 保存單一 GPU 的 ViewModel、NotifyIcon 與目前圖示快取鍵。
+    /// </summary>
+    private sealed class GpuTrayIcon(GpuViewModel gpu, Forms.NotifyIcon notifyIcon)
+    {
+        public GpuViewModel Gpu { get; } = gpu;
+
+        public Forms.NotifyIcon NotifyIcon { get; } = notifyIcon;
+
+        public string? IconKey { get; set; }
     }
 
     [DllImport("user32.dll", SetLastError = true)]
