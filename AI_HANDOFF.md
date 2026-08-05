@@ -282,4 +282,25 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - Pre-release validation on `main` at `c62a44d` (win-x64, Release): `dotnet build` 0 warnings / 0 errors, `dotnet test` 141/141 passed, `dotnet format --verify-no-changes` clean, and the self-contained single-file `dotnet publish` produced `publish/win-x64/ThermoTray.exe`.
 - Fixed a tray-icon defect introduced by the multi-GPU refactor: `TrayIconService.RebuildGpuIcons` re-registers the CPU `NotifyIcon` to keep the CPU-left ordering but left `_cpuIconKey` set, so the following `UpdateCpuIcon` treated the icon as unchanged and never drew onto the fresh `NotifyIcon`. The CPU tray slot went blank the first time a GPU appeared, and stayed blank whenever the CPU digits did not change afterwards (for example when no CPU sensor is readable). `_cpuIconKey` is now cleared alongside the icon replacement.
 - Bumped `<Version>` to `1.1.5` in `Directory.Build.props`, with the documentation fallbacks in `installer/ThermoTray.iss` and `README.md` updated to match.
-- Elevated live verification of the tray fix on real hardware is still pending; it needs a manual launch of the published build with a GPU present.
+- Merged as PR #4 into `main` at `480bcbd`, tagged `v1.1.5`, and the Release workflow published `ThermoTray-Setup-1.1.5.exe`, `ThermoTray-1.1.5-win-x64-portable.zip`, and `SHA256SUMS.txt`. Every workflow step passed, including the embedded `requireAdministrator` manifest check.
+
+## 2026-08-05 version 1.1.5 live verification
+
+- The user ran the released 1.1.5 build elevated on a dual-GPU laptop (Ryzen 9 5900HS with Radeon Graphics as GPU 0, GeForce RTX 3060 Laptop as GPU 1) and supplied a screenshot.
+- The tray fix is confirmed on real hardware: the CPU icon rendered its digits (7 / 57) instead of the blank slot the stale `_cpuIconKey` used to leave behind. This machine exercises the exact failing path, because a GPU list appearing makes `RebuildGpuIcons` re-register the CPU `NotifyIcon`.
+- Per-GPU separation held: each GPU had its own card with its own device name, the AMD integrated GPU reported `4%` utilization with an unavailable temperature, and the NVIDIA GPU reported `0%` and `44 °C` with no cross-pairing between the two.
+- The per-card tray checkboxes worked: GPU 0 had both cleared and its tray icon was hidden, leaving only the CPU and GPU 1 icons in the notification area.
+- Observed follow-up, not yet addressed: `GetAvailabilityMessage` returns `GpuSensorUnavailable` when **any** GPU lacks a temperature, so the status bar showed "GPU 溫度感測器未提供可信的即時讀值。" permanently even though the discrete GPU reported a valid 44 °C. On dual-GPU laptops the integrated GPU commonly has no temperature sensor, making the warning persistent and unactionable, and it does not say which GPU it refers to.
+- Observed follow-up, not yet addressed: in the screenshot the CPU icon sat to the right of the GPU icon rather than the intended CPU-left default. Windows preserves manually rearranged notification-area positions and this machine has carried ThermoTray across several versions, so this may be remembered ordering rather than a defect in `restoreCpuOrder`; it needs a clean notification-area state to tell the two apart.
+
+## 2026-08-05 version 1.1.6
+
+- Addressed the first follow-up from the 1.1.5 verification. The user chose the behavior: name the affected GPUs, and warn only when every GPU is missing the reading.
+- `MainViewModel.ListGpusMissingReading` is the new rule. It returns an empty string as soon as any GPU still reports the reading, so a dual-GPU laptop whose integrated GPU permanently lacks a temperature sensor no longer carries a standing warning while the discrete GPU reports a valid one. When every GPU is missing it, the GPUs are listed by the same `GPU 0` / `GPU 1` numbers the cards use.
+- `GpuSensorUnavailable` and `GpuUsageUnavailable` are now `{0}` format strings, filled through `string.Format(CultureInfo.CurrentCulture, ...)`. Added a `ListSeparator` key so the list joins with `、` in Traditional Chinese and `, ` in English.
+- Utilization follows the identical rule, so an integrated GPU that reports no utilization is silent while another GPU still reports it.
+- The cards are deliberately unchanged: a GPU without a reading still shows `無法取得` in its own card, which is where the per-device detail belongs. Only the single-line status bar changed.
+- Added 5 regression tests covering the mixed-availability, all-missing, single-GPU, no-GPU, and utilization cases, bringing the local total to 146.
+- Validation on win-x64 Release: `dotnet build` 0 warnings / 0 errors, `dotnet test` 146/146 passed, `dotnet format --verify-no-changes` clean.
+- Bumped `<Version>` to `1.1.6`, with `installer/ThermoTray.iss` and `README.md` version examples updated to match.
+- The notification-area ordering follow-up from 1.1.5 is still open and was not touched by this release.

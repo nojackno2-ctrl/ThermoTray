@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
@@ -620,20 +621,54 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return string.Empty;
         }
 
-        foreach (var gpu in snapshot.Gpus)
+        var separator = T["ListSeparator"];
+        var withoutTemperature = ListGpusMissingReading(snapshot.Gpus, static gpu => gpu.Temperature.IsAvailable, separator);
+        if (withoutTemperature.Length > 0)
         {
-            if (!gpu.Temperature.IsAvailable)
-            {
-                return T["GpuSensorUnavailable"];
-            }
+            return string.Format(CultureInfo.CurrentCulture, T["GpuSensorUnavailable"], withoutTemperature);
+        }
 
-            if (!gpu.Usage.IsAvailable)
+        var withoutUsage = ListGpusMissingReading(snapshot.Gpus, static gpu => gpu.Usage.IsAvailable, separator);
+        return withoutUsage.Length > 0
+            ? string.Format(CultureInfo.CurrentCulture, T["GpuUsageUnavailable"], withoutUsage)
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// 列出缺少指定讀值的 GPU 序號，但只在每一張 GPU 都缺少它時才回報。
+    /// 雙 GPU 筆電的內顯經常永遠不提供溫度，只要還有一張 GPU 給出可信讀值，
+    /// 狀態列就不該常駐一則使用者無法處理、也沒指出對象的警告；
+    /// 卡片本身仍會以「無法取得」標示那一張缺少讀值的 GPU。
+    /// </summary>
+    /// <param name="readings">目前快照中的所有 GPU。</param>
+    /// <param name="isAvailable">判斷單張 GPU 是否具備該讀值的條件。</param>
+    /// <param name="separator">本地化的清單分隔字元。</param>
+    /// <returns>需要提醒的 GPU 序號清單；若任一張仍有讀值則為空字串。</returns>
+    internal static string ListGpusMissingReading(
+        IReadOnlyList<GpuReading> readings,
+        Func<GpuReading, bool> isAvailable,
+        string separator)
+    {
+        if (readings.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        foreach (var reading in readings)
+        {
+            if (isAvailable(reading))
             {
-                return T["GpuUsageUnavailable"];
+                return string.Empty;
             }
         }
 
-        return string.Empty;
+        var names = new string[readings.Count];
+        for (var index = 0; index < readings.Count; index++)
+        {
+            names[index] = $"GPU {index}";
+        }
+
+        return string.Join(separator, names);
     }
 
     /// <summary>
