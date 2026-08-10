@@ -304,3 +304,11 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - Validation on win-x64 Release: `dotnet build` 0 warnings / 0 errors, `dotnet test` 146/146 passed, `dotnet format --verify-no-changes` clean.
 - Bumped `<Version>` to `1.1.6`, with `installer/ThermoTray.iss` and `README.md` version examples updated to match.
 - The notification-area ordering follow-up from 1.1.5 is still open and was not touched by this release.
+
+## 2026-08-10 public-facing Traditional Chinese README update
+
+- Completely rewrote and structured `README.md` for external/public users, with Traditional Chinese as the primary language alongside updated English documentation.
+- Included badges, clear project overview, core features breakdown (independent dual-line tray icons, adaptive vector outline typography, multi-GPU pairing, granular per-card tray visibility, dynamic sampling rates, memory optimizations, smart single-instance handover, UAC scheduled task autostart, and bilingual UI).
+- Added detailed sections on prerequisites (PawnIO driver and Administrator privileges), download/installation guides (installer vs. portable), user guide/shortcuts, FAQ/troubleshooting, development build/test instructions, and open-source acknowledgements.
+- Validation: `dotnet test .\ThermoTray.sln -c Release` passed all 146 tests.
+
