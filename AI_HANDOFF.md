@@ -312,3 +312,9 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - Added detailed sections on prerequisites (PawnIO driver and Administrator privileges), download/installation guides (installer vs. portable), user guide/shortcuts, FAQ/troubleshooting, development build/test instructions, and open-source acknowledgements.
 - Validation: `dotnet test .\ThermoTray.sln -c Release` passed all 146 tests.
 
+## 2026-08-11 public release license addition
+
+- Added standard MIT `LICENSE` to root directory for public open-source readiness.
+- Validation: `dotnet test .\ThermoTray.sln -c Release` clean and passed (0 warnings, 0 errors).
+
+
