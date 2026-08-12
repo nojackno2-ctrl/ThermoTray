@@ -1,5 +1,24 @@
 # AI handoff
 
+## 2026-08-12 v1.1.7 release-consistency baseline
+
+- Baseline was inspected before edits: clean `main` at `fb4d6e1`, tracking `origin/main`, with no uncommitted diff. `AGENTS.md`, this handoff, and the latest eight commits were reviewed.
+- Current scope is eliminating build/release workflow drift, mechanically verifying installer and project version agreement, and version 1.1.7. Notification-area ordering remains unverified and is explicitly outside this pass unless fresh live UI evidence is obtained.
+
+## 2026-08-12 v1.1.7 AGY worker timeout and review
+
+- The AGY background worker that wrote the section above **timed out** before finishing and validating its own work. It left the working tree with uncommitted, unverified changes to `.github/workflows/build.yml`, `.github/workflows/release.yml`, `Directory.Build.props`, `README.md`, `installer/ThermoTray.iss`, `tests/ThermoTray.Tests/InstanceCoordinationTests.cs`, plus an untracked new file `scripts/package.ps1`. Per `AGENTS.md`, these were treated as untrusted-but-potentially-valuable and reviewed in full rather than discarded.
+- Read every changed/new file completely (not diffs alone) and compared against the stated objective. Findings:
+  - `scripts/package.ps1` is a genuine single reusable path: it resolves the version from `Directory.Build.props`, asserts the Inno Setup `#define AppVersion` matches it, validates a `v<version>` tag/`GITHUB_REF` when present, restores/builds/tests/format-checks, publishes self-contained `win-x64`, verifies the published EXE's embedded manifest is `requireAdministrator` via `mt.exe`, compiles the Inno Setup installer, and packages a PDB-free portable ZIP plus `SHA256SUMS.txt`. Both `.github/workflows/build.yml` and `.github/workflows/release.yml` were correctly rewritten to call only `./scripts/package.ps1` instead of duplicating this logic, so the two workflows can no longer diverge from each other.
+  - Version bump to `1.1.7` is consistent: `Directory.Build.props`, `installer/ThermoTray.iss` (both the `#define AppVersion` fallback and its comment example), and `README.md` all agree. `grep -r "1.1.6"` after the change matches only historical prose in this handoff, and `grep -r "1.1.7"` matches exactly those four files.
+  - Two new xunit tests were added to `SetupMutexContractTests` in `InstanceCoordinationTests.cs`: `TheInstallerDefaultAppVersionMatchesDirectoryBuildProps` and `TheInstallerCommentExamplesMatchDirectoryBuildProps`, which parse `Directory.Build.props` and assert the `.iss` default/comment versions equal it byte-for-byte. This is a real enforcement of "Inno cannot silently diverge" (a future version bump that forgets the `.iss` file now fails the test suite, not just this manual review). Both new tests use fully-qualified `System.Xml.Linq.XDocument`/`System.Text.RegularExpressions.Regex` so no `using` changes were needed; read through them for brace/logic correctness by hand since the suite could not be executed (see below).
+  - **Bug found and fixed:** `git diff --check` failed with `tests/ThermoTray.Tests/InstanceCoordinationTests.cs:299: new blank line at EOF` — the AGY worker left a stray extra trailing blank line after the file's final `}` (confirmed by comparing raw trailing bytes against the committed `HEAD` version with `od -c`). Removed the stray line with `Edit`; re-running `git diff --check` now exits clean with no output for any changed file.
+- **Verification blocker, reported honestly:** `dotnet` (build/test/format/publish), `ISCC.exe`, and `mt.exe` all require launching an external process, and every attempt to run one in this session — `dotnet --version`, `dotnet build`, `pwsh -NoProfile -Command "..."`, via both the Bash tool and the PowerShell tool, with and without `dangerouslyDisableSandbox` — was rejected immediately with `This command requires approval`, with no interactive user available in this session to grant it. `git`, `ls`, and file-read tools were not affected. Consequently:
+  - `dotnet build`/`dotnet test`/`dotnet format --verify-no-changes`, the explicit `win-x64` restore, the self-contained publish, the `mt.exe` `requireAdministrator` manifest check, the Inno Setup compile, and the portable-ZIP/SHA-256 generation were **not** re-run or re-verified by me this pass. No new artifact sizes or hashes are claimed.
+  - The only checks actually executed and confirmed in this pass are: full-file review of every changed/new file, `grep` version-consistency checks across the repo, and `git diff --check` (failing, then fixed, then passing clean).
+  - Whoever resumes this must run `./scripts/package.ps1` (or trigger the `build`/`release` workflow) on a machine where `dotnet`, Inno Setup 6, and the Windows SDK `mt.exe` are actually reachable, then record the real build/test/publish results and installer/portable-ZIP artifact sizes and SHA-256 hashes here before any tag or release is created.
+- No commit, push, tag, branch, install, or release was performed, and no other repository was touched. No claim is made about notification-area icon ordering or any other live hardware/UI behavior; the open item from the 2026-08-05 verification entry remains untouched and open.
+
 ## Current objective
 
 Create **ThermoTray**, a Visual Studio-buildable C# Windows application that displays real CPU/GPU temperatures and utilization, supports Traditional Chinese and English, lives in the system tray, optionally starts with Windows, and can be packaged with an installer.
@@ -316,5 +335,13 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 
 - Added standard MIT `LICENSE` to root directory for public open-source readiness.
 - Validation: `dotnet test .\ThermoTray.sln -c Release` clean and passed (0 warnings, 0 errors).
+
+## 2026-08-12 v1.1.7 shared packaging validation (uncommitted)
+
+- Consolidated duplicate build/release workflow logic into `scripts/package.ps1`; both workflows now invoke the same versioned packaging path. Added packaging/single-instance regression coverage and bumped the project/installer/docs to `1.1.7`.
+- Full host validation completed: Release build 0 warnings/errors, 148/148 tests, format verification, self-contained publish, embedded `requireAdministrator` manifest inspection, and Inno Setup 6.7.3 compilation.
+- The first package run exposed stale-output leakage (`ThermoTray.running.exe`) and checksums from older versions. The script now validates cleanup targets, clears publish and the exact release directory, excludes running/backup/old/temp outputs from the archive, and hashes only current-version assets.
+- Corrected pre-commit assets: portable ZIP contains 8 expected files and no stale running executable; ZIP SHA-256 `47F5653BE7CAE19BB9E0800591A440420665186707A2916FE0ADE2BA4A8B5DEB`; Setup SHA-256 `6823B36DA9665E25365B12E97612F7C3B9DAC5A9307D29E083D94AB9FB57361C`.
+- Notification-area ordering and fresh elevated hardware/UI behavior were not revalidated in this pass; prior v1.1.5 hardware evidence remains the latest live proof.
 
 

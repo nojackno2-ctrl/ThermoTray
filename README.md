@@ -155,7 +155,10 @@ dotnet restore .\ThermoTray.sln -r win-x64
 dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --no-restore -o .\publish\win-x64
 
 # 4. 編譯 Inno Setup 安裝檔 (輸出至 artifacts\installer\)
-& "C:\Users\$env:USERNAME\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=1.1.6 .\installer\ThermoTray.iss
+& "C:\Users\$env:USERNAME\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=1.1.7 .\installer\ThermoTray.iss
+
+# 或一鍵執行標準發行封裝與驗證腳本：
+.\scripts\package.ps1
 ```
 
 > **版本號管理**：全專案的版本號單一來源為 `Directory.Build.props` 中的 `<Version>`，安裝指令碼與 GitHub Actions 自動建置流程皆自動讀取此處。
@@ -242,6 +245,9 @@ dotnet test .\ThermoTray.sln -c Release
 # Publish self-contained single-file binary
 dotnet restore .\ThermoTray.sln -r win-x64
 dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --no-restore -o .\publish\win-x64
+
+# Or run the unified packaging & verification script:
+.\scripts\package.ps1
 ```
 
 ---
