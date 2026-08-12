@@ -1,5 +1,10 @@
 # AI handoff
 
+## 2026-08-12 v1.1.7 publication and installed update
+
+- Published GitHub Release `v1.1.7` from `e222bdea567951b2e5df7a0710f08ee1f02b2d66`; branch Build and tag Release succeeded. Downloaded digests: ZIP `B36D4FB1...91E11EC`, Setup `70A42B87...5331A`.
+- Updated the installation from `1.1.6` to `1.1.7` through an elevated helper. Installed product version is `1.1.7+e222bdea567951b2e5df7a0710f08ee1f02b2d66`; exactly one elevated process remained responsive. No fresh sensor/UI correctness claim was made.
+
 ## 2026-08-12 v1.1.7 release-consistency baseline
 
 - Baseline was inspected before edits: clean `main` at `fb4d6e1`, tracking `origin/main`, with no uncommitted diff. `AGENTS.md`, this handoff, and the latest eight commits were reviewed.
