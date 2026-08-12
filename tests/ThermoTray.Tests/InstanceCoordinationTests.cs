@@ -223,7 +223,7 @@ public sealed class InstanceHandoverTests
 }
 
 /// <summary>
-/// 驗證 Inno Setup 安裝腳本與程式碼間全域互斥鎖名稱一致性的單元測試。
+/// 驗證 Inno Setup 安裝腳本與專案組態間全域互斥鎖名稱與版本號一致性的單元測試。
 /// </summary>
 public sealed class SetupMutexContractTests
 {
@@ -240,6 +240,47 @@ public sealed class SetupMutexContractTests
             "AppMutex=" + InstanceCoordinator.SetupMutexName,
             File.ReadAllText(script),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 驗證 `installer/ThermoTray.iss` 中的預設 AppVersion 與 `Directory.Build.props` 中的 Version 完全一致，防止版本無聲分歧。
+    /// </summary>
+    [Fact]
+    public void TheInstallerDefaultAppVersionMatchesDirectoryBuildProps()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var propsPath = Path.Combine(repoRoot, "Directory.Build.props");
+        var scriptPath = Path.Combine(repoRoot, "installer", "ThermoTray.iss");
+
+        Assert.True(File.Exists(propsPath), $"Directory.Build.props not found at {propsPath}");
+        Assert.True(File.Exists(scriptPath), $"Installer script not found at {scriptPath}");
+
+        var propsXml = System.Xml.Linq.XDocument.Load(propsPath);
+        var expectedVersion = propsXml.Root?.Element("PropertyGroup")?.Element("Version")?.Value?.Trim();
+        Assert.False(string.IsNullOrWhiteSpace(expectedVersion), "Version not defined in Directory.Build.props");
+
+        var scriptContent = File.ReadAllText(scriptPath);
+        var match = System.Text.RegularExpressions.Regex.Match(scriptContent, @"#define\s+AppVersion\s+""([^""]+)""");
+        Assert.True(match.Success, "Could not find '#define AppVersion' in installer/ThermoTray.iss");
+
+        Assert.Equal(expectedVersion, match.Groups[1].Value);
+    }
+
+    /// <summary>
+    /// 驗證 `installer/ThermoTray.iss` 註解範例中的版本參數與 `Directory.Build.props` 一致。
+    /// </summary>
+    [Fact]
+    public void TheInstallerCommentExamplesMatchDirectoryBuildProps()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var propsPath = Path.Combine(repoRoot, "Directory.Build.props");
+        var scriptPath = Path.Combine(repoRoot, "installer", "ThermoTray.iss");
+
+        var propsXml = System.Xml.Linq.XDocument.Load(propsPath);
+        var expectedVersion = propsXml.Root?.Element("PropertyGroup")?.Element("Version")?.Value?.Trim();
+
+        var scriptContent = File.ReadAllText(scriptPath);
+        Assert.Contains($"/DAppVersion={expectedVersion}", scriptContent, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
