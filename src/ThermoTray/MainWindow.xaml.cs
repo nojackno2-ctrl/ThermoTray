@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Navigation;
 
 namespace ThermoTray;
@@ -10,6 +11,23 @@ namespace ThermoTray;
 /// </summary>
 public partial class MainWindow : Window
 {
+    private static readonly string[] PaletteResourceKeys =
+    [
+        "WindowBrush",
+        "PanelBrush",
+        "SurfaceBrush",
+        "SurfaceHoverBrush",
+        "SurfacePressedBrush",
+        "BorderBrush",
+        "AccentBrush",
+        "AccentTextBrush",
+        "TextPrimaryBrush",
+        "TextSecondaryBrush",
+        "TextMutedBrush",
+    ];
+
+    private readonly Dictionary<string, object> _standardPalette = new(StringComparer.Ordinal);
+
     /// <summary>
     /// 標記是否為真正的關閉請求（由選單「結束」觸發），而非點擊右上角 X 按鈕隱藏至系統匣。
     /// </summary>
@@ -21,7 +39,62 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        CaptureStandardPalette();
+        ApplyAccessibilityPalette();
+        SystemParameters.StaticPropertyChanged += OnSystemParametersStaticPropertyChanged;
         StateChanged += OnStateChanged;
+        Closed += OnClosed;
+    }
+
+    private void CaptureStandardPalette()
+    {
+        foreach (var key in PaletteResourceKeys)
+        {
+            if (System.Windows.Application.Current.Resources[key] is object value)
+            {
+                _standardPalette[key] = value;
+            }
+        }
+    }
+
+    private void ApplyAccessibilityPalette()
+    {
+        var resources = System.Windows.Application.Current.Resources;
+        if (!SystemParameters.HighContrast)
+        {
+            foreach (var pair in _standardPalette)
+            {
+                resources[pair.Key] = pair.Value;
+            }
+
+            return;
+        }
+
+        resources["WindowBrush"] = System.Windows.SystemColors.WindowBrush;
+        resources["PanelBrush"] = System.Windows.SystemColors.WindowBrush;
+        resources["SurfaceBrush"] = System.Windows.SystemColors.ControlBrush;
+        resources["SurfaceHoverBrush"] = System.Windows.SystemColors.ControlLightBrush;
+        resources["SurfacePressedBrush"] = System.Windows.SystemColors.ControlDarkBrush;
+        resources["BorderBrush"] = System.Windows.SystemColors.ActiveBorderBrush;
+        resources["AccentBrush"] = System.Windows.SystemColors.HighlightBrush;
+        resources["AccentTextBrush"] = System.Windows.SystemColors.HighlightTextBrush;
+        resources["TextPrimaryBrush"] = System.Windows.SystemColors.WindowTextBrush;
+        resources["TextSecondaryBrush"] = System.Windows.SystemColors.WindowTextBrush;
+        resources["TextMutedBrush"] = System.Windows.SystemColors.GrayTextBrush;
+    }
+
+    private void OnSystemParametersStaticPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.PropertyName, nameof(SystemParameters.HighContrast), StringComparison.Ordinal))
+        {
+            ApplyAccessibilityPalette();
+        }
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        SystemParameters.StaticPropertyChanged -= OnSystemParametersStaticPropertyChanged;
+        Closed -= OnClosed;
     }
 
     /// <summary>

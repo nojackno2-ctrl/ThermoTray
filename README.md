@@ -79,7 +79,7 @@ PawnIO 基於安全性僅允許已提權（Elevated）的處理程序存取核�
 
 | 檔案類型 | 檔案名稱 | 說明 |
 | :--- | :--- | :--- |
-| **安裝版** | `ThermoTray-Setup-x.x.x.exe` | Inno Setup 安裝精靈，安裝至使用者的 LocalAppData 目錄，支援覆蓋升級與自動偵測執行狀態。 |
+| **安裝版** | `ThermoTray-Setup-x.x.x.exe` | Inno Setup 安裝精靈，安裝至使用者的 LocalAppData，支援覆蓋升級與執行狀態偵測；固定建立開始功能表的啟動／解除安裝捷徑，可自行釘選到開始或工作列，桌面捷徑則為預設不勾選的選用項目。 |
 | **可攜版** | `ThermoTray-x.x.x-win-x64-portable.zip` | 免安裝綠色壓縮檔，解壓縮至任意目錄即可直接執行 `ThermoTray.exe`。 |
 
 ---
@@ -231,7 +231,7 @@ PawnIO requires elevated process privileges to access hardware registers.
 
 Visit the [GitHub Releases Page](https://github.com/nojackno2-ctrl/ThermoTray/releases/latest):
 
-- **Setup Installer (`ThermoTray-Setup-x.x.x.exe`)**: Installs to `%LOCALAPPDATA%`, checks for running instances, and supports clean upgrades.
+- **Setup Installer (`ThermoTray-Setup-x.x.x.exe`)**: Installs to `%LOCALAPPDATA%`, checks for running instances, supports clean upgrades, and always creates Start Menu launch/uninstall shortcuts that users can pin manually. The optional desktop shortcut is off by default.
 - **Portable ZIP (`ThermoTray-x.x.x-win-x64-portable.zip`)**: Extract anywhere and launch `ThermoTray.exe`.
 
 ---
