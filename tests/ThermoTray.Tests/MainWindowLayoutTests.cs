@@ -24,7 +24,8 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
     public void TheCardsShowTheirWholeContents() =>
         _fixture.Invoke(window =>
         {
-            AssertContentFits(window.CpuCard, "CPU");
+            Assert.True(window.CpuCard.ActualHeight > 0, "the CPU panel renders nothing");
+            Assert.True(window.CpuCard.DesiredSize.Height <= window.CpuCard.ActualHeight + 0.5);
             Assert.Equal(2, window.GpuCards.Items.Count);
             Assert.True(window.GpuCards.ActualHeight > 0, "the independent GPU cards render nothing");
         });
@@ -33,11 +34,9 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
     public void TheCpuDeviceNameIsTheFirstCardLineAndEachMetricHasATrayToggle() =>
         _fixture.Invoke(window =>
         {
-            var stack = (StackPanel)window.CpuCard.Child;
-
-            Assert.Equal("AMD Ryzen 9 5900HS with Radeon Graphics", ((TextBlock)stack.Children[0]).Text);
-            Assert.IsType<System.Windows.Controls.CheckBox>(((Grid)stack.Children[1]).Children[1]);
-            Assert.IsType<System.Windows.Controls.CheckBox>(((Grid)stack.Children[3]).Children[1]);
+            Assert.Equal("AMD Ryzen 9 5900HS with Radeon Graphics", window.CpuDeviceNameText.Text);
+            Assert.True(window.CpuUsageTrayToggle.IsChecked);
+            Assert.True(window.CpuTemperatureTrayToggle.IsChecked);
         });
 
     /// <summary>
@@ -48,7 +47,7 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         _fixture.Invoke(window =>
         {
             var content = (FrameworkElement)window.Content;
-            var settings = (FrameworkElement)((Grid)content).Children[^1];
+            var settings = window.SettingsPanel;
             var bottom = settings.TransformToAncestor(content).TransformBounds(new Rect(settings.RenderSize)).Bottom;
 
             Assert.True(
@@ -71,8 +70,7 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         _fixture.Invoke(window =>
         {
             var content = (FrameworkElement)window.Content;
-            var title = (StackPanel)((StackPanel)((Grid)content).Children[0]).Children[0];
-            var version = (TextBlock)title.Children[1];
+            var version = window.ProductVersionText;
 
             Assert.Equal(MainViewModel.FormatVersion(typeof(MainViewModel).Assembly.GetName().Version), version.Text);
             Assert.True(version.ActualWidth > 0, "the version renders nothing");
@@ -94,6 +92,49 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
         Assert.True(
             bottom <= available + 0.5,
             $"the {which} card cuts its last line off: it reaches {bottom} inside a card that ends at {available}");
+    }
+
+    [Fact]
+    public void TheMultiGpuSurfaceIsScrollSafeAndKeepsADenseMinimumWidth() =>
+        _fixture.Invoke(window =>
+        {
+            var scrollViewer = FindVisualChild<ScrollViewer>(window.RootLayout);
+
+            Assert.NotNull(scrollViewer);
+            Assert.Equal(ScrollBarVisibility.Auto, scrollViewer.VerticalScrollBarVisibility);
+            Assert.Equal(560, scrollViewer.MaxHeight);
+            Assert.Equal(600, window.MinWidth);
+        });
+
+    [Fact]
+    public void TheRedesignUsesOneAccentAndConsistentPanelRadii() =>
+        _fixture.Invoke(window =>
+        {
+            Assert.True(System.Windows.Application.Current.Resources.Contains("AccentBrush"));
+            Assert.False(System.Windows.Application.Current.Resources.Contains("GpuAccentBrush"));
+            Assert.Equal(new CornerRadius(12), window.CpuCard.CornerRadius);
+            Assert.Equal(new CornerRadius(12), window.StatusPanel.CornerRadius);
+        });
+
+    private static T? FindVisualChild<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 }
 

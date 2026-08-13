@@ -1,5 +1,30 @@
 # AI handoff
 
+## 2026-08-13 GitHub upload (in progress)
+
+- User authorized uploading the complete current verified worktree, including the WPF redesign and installer-experience hardening. Scope is this repository only.
+- Remote audit after `fetch --prune --tags`: local `main` and `origin/main` are identical with no other local/remote branches. Publish through `agent/ui-installer-experience`, one intentional commit, and a Draft PR targeting `main`.
+- This authorization does not include a GitHub Release, tag, installer execution, or installed-application update.
+
+## 2026-08-13 installer experience hardening (complete, uncommitted)
+
+- Scope is limited to `installer/ThermoTray.iss` and a new installer contract test; the concurrent uncommitted WPF redesign remains preserved and untouched.
+- The installer now always creates Start Menu application/uninstall shortcuts with a stable AppUserModelID and `{app}` working directory; the desktop shortcut remains optional and defaults unchecked.
+- Added previous-install preference reuse, setup/uninstall logging, explicit uninstall identity/version fields, GitHub support/update metadata, installed README/LICENSE files, and matching bilingual README guidance for manual Start/Taskbar pinning. The existing AppMutex handover and `CloseApplications=no` safety design are preserved.
+- First test compile failed only because this test project does not enable implicit `System`/`System.IO` imports and the new standalone test omitted them. The imports were added before the successful rerun; no product or installer failure was observed.
+- Verification after correction: Release build passed with 0 warnings/errors, tests passed 152/152, formatting passed, self-contained publish passed, and `mt.exe` verified the embedded `requireAdministrator` manifest. Inno Setup 6.7.3 compiled the installer and the canonical release packaging regenerated `SHA256SUMS.txt`. Final installer: `artifacts/release/ThermoTray-Setup-1.1.7.exe`, 54,036,016 bytes, SHA-256 `920018D3F19E4CEAD2B617079D7CF2B2BD0F1C9275CADA4A399DBC313E862686`, file version 1.1.7.
+- No installer was executed, no installed application was updated, and no commit/push/release was performed.
+
+## 2026-08-13 taste-skill UI redesign
+
+- Scope is a UI-only targeted evolution of the elevated WPF monitor. The sensor pipeline, availability rules, multi-GPU identity, polling cadence, tray rendering, and persisted per-metric tray visibility are explicitly preserved.
+- Design Read: a trustworthy, compact Windows hardware instrument panel for everyday users and diagnostics. Dials are `DESIGN_VARIANCE 4`, `MOTION_INTENSITY 2`, and `VISUAL_DENSITY 8`; native WPF remains the only design system and no dependency is being added.
+- Existing audit: the cool dark palette used separate mint CPU and blue GPU accents, generic rounded cards, cramped two-column CPU/GPU composition, repeated tiny tray toggles, a visually weak status line, mixed corner radii, and no explicit high-contrast palette. Information architecture is sound and remains header, live devices, contextual status/action, and preferences.
+- Implemented one restrained mint accent, neutral device identity, full-width device rows with paired usage/temperature metrics, consistent 12 px panel and 8 px control radii, clearer focus/hover/pressed/disabled states, scroll-safe multi-GPU layout, contextual status panel, and runtime high-contrast resource switching. Empty status text collapses the status panel; actionable/error states remain contextual and use polite UI Automation live announcements.
+- `MainWindow.xaml` keeps every existing binding and tray visibility toggle. It caps the live-device surface at 560 px with vertical scrolling, so a second or later GPU no longer makes the whole window exceed the work area. Numeric readings use the installed Consolas monospace face while interface copy uses Segoe UI Variable Text/Segoe UI. No package or font dependency was added.
+- Added `StringToVisibilityConverter` and expanded the rendered-window layout contract with scroll-safety, dense minimum-width, single-accent, and radius assertions. Release build passed with 0 warnings/errors; all 150 tests passed; `dotnet format --verify-no-changes` and `git diff --check` passed. The first sandboxed build was blocked from the user's NuGet config; the host build then exposed ambiguous `SystemColors` because WinForms and WPF are both enabled, which was fixed with explicit `System.Windows.SystemColors` references before the clean build.
+- Visual scope is verified through the existing STA rendered-window tests, not by an inspected desktop screenshot. The shipped app requires elevation, and no UAC/elevated live launch was performed, so actual high-contrast switching, live hardware values, tray visuals/order, and desktop-scale appearance remain unverified in this pass.
+
 ## 2026-08-12 v1.1.7 publication and installed update
 
 - Published GitHub Release `v1.1.7` from `e222bdea567951b2e5df7a0710f08ee1f02b2d66`; branch Build and tag Release succeeded. Downloaded digests: ZIP `B36D4FB1...91E11EC`, Setup `70A42B87...5331A`.
