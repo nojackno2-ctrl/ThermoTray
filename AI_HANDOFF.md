@@ -1,9 +1,10 @@
 # AI handoff
 
-## 2026-08-13 GitHub upload (in progress)
+## 2026-08-13 GitHub upload (complete)
 
 - User authorized uploading the complete current verified worktree, including the WPF redesign and installer-experience hardening. Scope is this repository only.
-- Remote audit after `fetch --prune --tags`: local `main` and `origin/main` are identical with no other local/remote branches. Publish through `agent/ui-installer-experience`, one intentional commit, and a Draft PR targeting `main`.
+- Remote audit after `fetch --prune --tags` found local `main` and `origin/main` identical with no other pre-existing branches. Initial source commit `96da297` was pushed to `agent/ui-installer-experience`; Draft PR #6 targets `main`: https://github.com/nojackno2-ctrl/ThermoTray/pull/6
+- GitHub connector PR creation returned `403 Resource not accessible by integration`; the authenticated host `gh pr create` fallback succeeded. A final handoff-only commit records the completed remote state on the same PR branch.
 - This authorization does not include a GitHub Release, tag, installer execution, or installed-application update.
 
 ## 2026-08-13 installer experience hardening (complete, uncommitted)
