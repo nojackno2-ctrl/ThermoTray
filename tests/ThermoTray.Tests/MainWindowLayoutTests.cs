@@ -110,8 +110,8 @@ public sealed class MainWindowLayoutTests : IClassFixture<MainWindowFixture>
     public void TheRedesignUsesOneAccentAndConsistentPanelRadii() =>
         _fixture.Invoke(window =>
         {
-            Assert.True(System.Windows.Application.Current.Resources.Contains("AccentBrush"));
-            Assert.False(System.Windows.Application.Current.Resources.Contains("GpuAccentBrush"));
+            Assert.True(_fixture.Application.Resources.Contains("AccentBrush"));
+            Assert.False(_fixture.Application.Resources.Contains("GpuAccentBrush"));
             Assert.Equal(new CornerRadius(12), window.CpuCard.CornerRadius);
             Assert.Equal(new CornerRadius(12), window.StatusPanel.CornerRadius);
         });
@@ -198,6 +198,8 @@ public sealed class MainWindowFixture : IDisposable
         _window = window!;
         _application = application!;
     }
+
+    public App Application => _application;
 
     /// <summary>
     /// 在 UI 執行緒分派執行斷言。
