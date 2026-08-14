@@ -375,4 +375,12 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - Corrected pre-commit assets: portable ZIP contains 8 expected files and no stale running executable; ZIP SHA-256 `47F5653BE7CAE19BB9E0800591A440420665186707A2916FE0ADE2BA4A8B5DEB`; Setup SHA-256 `6823B36DA9665E25365B12E97612F7C3B9DAC5A9307D29E083D94AB9FB57361C`.
 - Notification-area ordering and fresh elevated hardware/UI behavior were not revalidated in this pass; prior v1.1.5 hardware evidence remains the latest live proof.
 
+## 2026-08-13 installed software update verification
+
+- Silently updated the current-user installation with `artifacts\release\ThermoTray-Setup-1.1.7.exe`; the installer returned exit code `0` and did not request a reboot.
+- Installed executable: `%LOCALAPPDATA%\Programs\ThermoTray\ThermoTray.exe`; FileVersion `1.1.7.0`, ProductVersion `1.1.7+acef9fb0781f2d6a7f9a4c995aba7843efad56a8`, SHA-256 `9ED1C1773A93415184B07772FFCB1CC025A4A51F6D9EEE6668A047645B663D91`. It is byte-for-byte identical to the current publish output.
+- Verified the registered version, install location, uninstall command, project/issues/update URLs, and the Start Menu launch/uninstall shortcuts. Removed the stale duplicate root-level `ThermoTray.lnk`; the current program-group shortcut remains valid.
+- Launched the exact installed executable with elevation; PID `39000` reported `Responding=True`. This verifies elevated launch and process responsiveness only; sensor correctness and fresh visual behavior were not revalidated.
+- The user's authorization in this milestone covers updating installed software; this handoff entry is not yet committed or pushed.
+
 
