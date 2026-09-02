@@ -1,5 +1,23 @@
 # AI handoff
 
+## 2026-08-31 modern obsidian tech UI redesign (complete, uncommitted)
+
+- User reported that the previous UI was unappealing and dated ("我覺得UI很醜").
+- Performed a comprehensive redesign into a modern **Windows 11 Fluent Dark / Obsidian Tech Instrument** panel:
+  - Replaced the dull flat gray background with deep obsidian layers (`#0B0E14` window, `#131822` device card, `#1A212D` metric surface, `#242E3D` 1px crisp borders).
+  - Modernized typography with Segoe UI Variable Display / Segoe UI Variable Text and clean numeric hierarchy.
+  - Added hardware chip identification badges (`[ CPU ]` / `[ GPU 0 ]`) with glowing accent borders.
+  - Replaced cluttered repeated "顯示在工具列" checkbox text with sleek modern 30x16 micro capsule switches (`MetricToggleStyle`) with tooltips, maintaining full two-way binding with `ShowCpuUsageInTray`, `ShowCpuTemperatureInTray`, `ShowUsageInTray`, and `ShowTemperatureInTray`.
+  - Introduced `MetricToDoubleConverter` and integrated 4px slim dynamic level gauge bars (`MetricProgressBarStyle`) beneath usage (0~100%) and temperature metrics.
+  - Polished the header with a glowing squircle app icon container and modern version badge pill.
+  - Replaced the bottom settings section with an integrated footer toolbar (`SettingsPanel`).
+- Added unit tests in `tests/ThermoTray.Tests/MetricToDoubleConverterTests.cs` (14 new tests) covering numeric parsing, clamping, comma handling, and unavailable/invalid string fallback.
+- Validation:
+  - `dotnet build ThermoTray.sln --configuration Release`: passed with 0 warnings and 0 errors.
+  - `dotnet test ThermoTray.sln --configuration Release`: passed all 166/166 tests.
+  - `dotnet format ThermoTray.sln --verify-no-changes`: passed with no changes.
+- Per collaboration rules, no commit, push, or release was executed.
+
 ## 2026-08-13 GitHub upload (complete)
 
 - User authorized uploading the complete current verified worktree, including the WPF redesign and installer-experience hardening. Scope is this repository only.

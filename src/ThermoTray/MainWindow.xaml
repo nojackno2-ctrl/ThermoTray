@@ -1,7 +1,6 @@
 <Window x:Class="ThermoTray.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
         Title="ThermoTray"
         Width="720"
         MinWidth="600"
@@ -26,42 +25,69 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
+    <!-- 頂部視窗標題與產品版本列 -->
     <Grid>
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
-      <Border Background="{DynamicResource AccentBrush}" CornerRadius="2" />
-      <StackPanel Grid.Column="1" Margin="14,0,0,0">
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Text="ThermoTray" FontSize="24" FontWeight="SemiBold" />
-          <TextBlock x:Name="ProductVersionText"
-                     Text="{Binding Version}"
-                     Foreground="{DynamicResource TextMutedBrush}"
-                     FontFamily="Consolas"
-                     FontSize="12"
-                     VerticalAlignment="Bottom"
-                     Margin="10,0,0,4" />
+
+      <!-- 應用程式圖標與微光底框 -->
+      <Border Width="40"
+              Height="40"
+              Background="{DynamicResource IconBadgeBrush}"
+              BorderBrush="{DynamicResource IconBadgeBorderBrush}"
+              BorderThickness="1"
+              CornerRadius="10"
+              VerticalAlignment="Center"
+              Margin="0,0,14,0"
+              SnapsToDevicePixels="True">
+        <Image Source="ThermoTray.ico" Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+
+      <StackPanel Grid.Column="1" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="ThermoTray"
+                     FontSize="20"
+                     FontWeight="SemiBold"
+                     Foreground="{DynamicResource TextPrimaryBrush}" />
+          <Border Margin="10,0,0,0"
+                  Background="{DynamicResource VersionBadgeBrush}"
+                  BorderBrush="{DynamicResource VersionBadgeBorderBrush}"
+                  BorderThickness="1"
+                  CornerRadius="5"
+                  Padding="6,1"
+                  VerticalAlignment="Center">
+            <TextBlock x:Name="ProductVersionText"
+                       Text="{Binding Version}"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                       FontSize="11"
+                       FontWeight="Medium" />
+          </Border>
         </StackPanel>
         <TextBlock Text="{Binding T[Subtitle]}"
-                   Foreground="{DynamicResource TextSecondaryBrush}"
-                   Margin="0,4,0,0"
+                   Foreground="{DynamicResource TextMutedBrush}"
+                   FontSize="12"
+                   Margin="0,3,0,0"
                    TextWrapping="Wrap" />
       </StackPanel>
     </Grid>
 
     <Border Grid.Row="1"
             Height="1"
-            Margin="0,18,0,0"
-            Background="{DynamicResource BorderBrush}" />
+            Margin="0,16,0,0"
+            Background="{DynamicResource BorderSubtleBrush}" />
 
+    <!-- 硬體即時監測卡片清單 (支援雙 GPU 滾動安全) -->
     <ScrollViewer Grid.Row="2"
                   MaxHeight="560"
-                  Margin="0,18,0,0"
+                  Margin="0,16,0,0"
                   VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   PanningMode="VerticalOnly">
       <StackPanel>
+        <!-- CPU 監測卡片 -->
         <Border x:Name="CpuCard" Style="{StaticResource DevicePanelStyle}">
           <Grid>
             <Grid.RowDefinitions>
@@ -70,86 +96,93 @@
               <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
+            <!-- 裝置識別標籤與完整名稱 -->
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
-              <TextBlock Text="CPU"
-                         Foreground="{DynamicResource AccentBrush}"
-                         FontFamily="Consolas"
-                         FontSize="12"
-                         FontWeight="Bold"
-                         VerticalAlignment="Center"
-                         Margin="0,0,14,0" />
+              <Border Style="{StaticResource DeviceBadgeStyle}">
+                <TextBlock Text="CPU" Style="{StaticResource DeviceBadgeTextStyle}" />
+              </Border>
               <TextBlock x:Name="CpuDeviceNameText"
                          Grid.Column="1"
                          Text="{Binding CpuDeviceName}"
-                         FontSize="17"
-                         FontWeight="SemiBold"
-                         TextWrapping="Wrap" />
+                         Style="{StaticResource DeviceNameTextStyle}" />
             </Grid>
 
-            <Grid Grid.Row="1" Margin="0,16,0,14">
+            <!-- 使用率與溫度數據磁貼 (雙欄等寬) -->
+            <Grid Grid.Row="1" Margin="0,14,0,12">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
 
+              <!-- CPU 使用率磁貼 -->
               <Border Style="{StaticResource MetricPanelStyle}">
-                <StackPanel>
+                <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
                   <Grid>
                     <TextBlock Text="{Binding T[CpuUsage]}"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               VerticalAlignment="Center" />
+                               Style="{StaticResource MetricLabelStyle}" />
                     <CheckBox x:Name="CpuUsageTrayToggle"
-                              Content="{Binding T[ShowInTray]}"
                               IsChecked="{Binding ShowCpuUsageInTray, Mode=TwoWay}"
+                              ToolTip="{Binding T[ShowInTray]}"
                               Style="{StaticResource MetricToggleStyle}" />
                   </Grid>
-                  <TextBlock Text="{Binding CpuUsage}"
-                             Foreground="{DynamicResource TextPrimaryBrush}"
-                             FontFamily="Consolas"
-                             FontSize="32"
-                             FontWeight="SemiBold"
-                             Margin="0,8,0,0"
+                  <TextBlock Grid.Row="1"
+                             Text="{Binding CpuUsage}"
+                             Style="{StaticResource MetricValuePrimaryStyle}"
                              AutomationProperties.Name="{Binding T[CpuUsage]}" />
-                </StackPanel>
+                  <ProgressBar Grid.Row="2"
+                               Value="{Binding CpuUsage, Mode=OneWay, Converter={StaticResource MetricToDoubleConverter}}"
+                               Style="{StaticResource MetricProgressBarStyle}" />
+                </Grid>
               </Border>
 
+              <!-- CPU 溫度磁貼 -->
               <Border Grid.Column="2" Style="{StaticResource MetricPanelStyle}">
-                <StackPanel>
+                <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
                   <Grid>
                     <TextBlock Text="{Binding T[CpuTemperature]}"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               VerticalAlignment="Center" />
+                               Style="{StaticResource MetricLabelStyle}" />
                     <CheckBox x:Name="CpuTemperatureTrayToggle"
-                              Content="{Binding T[ShowInTray]}"
                               IsChecked="{Binding ShowCpuTemperatureInTray, Mode=TwoWay}"
+                              ToolTip="{Binding T[ShowInTray]}"
                               Style="{StaticResource MetricToggleStyle}" />
                   </Grid>
-                  <TextBlock Text="{Binding CpuTemperature}"
-                             Foreground="{DynamicResource AccentBrush}"
-                             FontFamily="Consolas"
-                             FontSize="32"
-                             FontWeight="SemiBold"
-                             Margin="0,8,0,0"
+                  <TextBlock Grid.Row="1"
+                             Text="{Binding CpuTemperature}"
+                             Style="{StaticResource MetricValueAccentStyle}"
                              AutomationProperties.Name="{Binding T[CpuTemperature]}" />
-                </StackPanel>
+                  <ProgressBar Grid.Row="2"
+                               Value="{Binding CpuTemperature, Mode=OneWay, Converter={StaticResource MetricToDoubleConverter}}"
+                               Style="{StaticResource MetricProgressBarStyle}" />
+                </Grid>
               </Border>
             </Grid>
 
-            <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
-              <TextBlock Text="{Binding CpuSource}"
-                         Foreground="{DynamicResource TextMutedBrush}"
-                         FontFamily="Consolas"
-                         FontSize="12"
-                         TextWrapping="Wrap" />
+            <!-- 底層感測器來源標記 -->
+            <Border Grid.Row="2" Style="{StaticResource DeviceFooterBorderStyle}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="SENSOR: " Style="{StaticResource SensorPrefixTextStyle}" />
+                <TextBlock Text="{Binding CpuSource}" Style="{StaticResource SensorSourceTextStyle}" />
+              </StackPanel>
             </Border>
           </Grid>
         </Border>
 
+        <!-- GPU 監測卡片清單 (獨立顯示) -->
         <ItemsControl x:Name="GpuCards"
                       ItemsSource="{Binding Gpus}"
                       Margin="0,12,0,0"
@@ -169,79 +202,85 @@
                     <RowDefinition Height="Auto" />
                   </Grid.RowDefinitions>
 
+                  <!-- 裝置識別標籤與完整名稱 -->
                   <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="Auto" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding DisplayName}"
-                               Foreground="{DynamicResource AccentBrush}"
-                               FontFamily="Consolas"
-                               FontSize="12"
-                               FontWeight="Bold"
-                               VerticalAlignment="Center"
-                               Margin="0,0,14,0" />
+                    <Border Style="{StaticResource DeviceBadgeStyle}">
+                      <TextBlock Text="{Binding DisplayName}" Style="{StaticResource DeviceBadgeTextStyle}" />
+                    </Border>
                     <TextBlock Grid.Column="1"
                                Text="{Binding DeviceName}"
-                               FontSize="17"
-                               FontWeight="SemiBold"
-                               TextWrapping="Wrap" />
+                               Style="{StaticResource DeviceNameTextStyle}" />
                   </Grid>
 
-                  <Grid Grid.Row="1" Margin="0,16,0,14">
+                  <!-- 使用率與溫度數據磁貼 -->
+                  <Grid Grid.Row="1" Margin="0,14,0,12">
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="12" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
+                    <!-- GPU 使用率磁貼 -->
                     <Border Style="{StaticResource MetricPanelStyle}">
-                      <StackPanel>
+                      <Grid>
+                        <Grid.RowDefinitions>
+                          <RowDefinition Height="Auto" />
+                          <RowDefinition Height="Auto" />
+                          <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid>
                           <TextBlock Text="{Binding UsageLabel}"
-                                     Foreground="{DynamicResource TextSecondaryBrush}"
-                                     VerticalAlignment="Center" />
-                          <CheckBox Content="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
-                                    IsChecked="{Binding ShowUsageInTray, Mode=TwoWay}"
+                                     Style="{StaticResource MetricLabelStyle}" />
+                          <CheckBox IsChecked="{Binding ShowUsageInTray, Mode=TwoWay}"
+                                    ToolTip="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
                                     Style="{StaticResource MetricToggleStyle}" />
                         </Grid>
-                        <TextBlock Text="{Binding Usage}"
-                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                   FontFamily="Consolas"
-                                   FontSize="32"
-                                   FontWeight="SemiBold"
-                                   Margin="0,8,0,0"
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding Usage}"
+                                   Style="{StaticResource MetricValuePrimaryStyle}"
                                    AutomationProperties.Name="{Binding UsageLabel}" />
-                      </StackPanel>
+                        <ProgressBar Grid.Row="2"
+                                     Value="{Binding Usage, Mode=OneWay, Converter={StaticResource MetricToDoubleConverter}}"
+                                     Style="{StaticResource MetricProgressBarStyle}" />
+                      </Grid>
                     </Border>
 
+                    <!-- GPU 溫度磁貼 -->
                     <Border Grid.Column="2" Style="{StaticResource MetricPanelStyle}">
-                      <StackPanel>
+                      <Grid>
+                        <Grid.RowDefinitions>
+                          <RowDefinition Height="Auto" />
+                          <RowDefinition Height="Auto" />
+                          <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid>
                           <TextBlock Text="{Binding TemperatureLabel}"
-                                     Foreground="{DynamicResource TextSecondaryBrush}"
-                                     VerticalAlignment="Center" />
-                          <CheckBox Content="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
-                                    IsChecked="{Binding ShowTemperatureInTray, Mode=TwoWay}"
+                                     Style="{StaticResource MetricLabelStyle}" />
+                          <CheckBox IsChecked="{Binding ShowTemperatureInTray, Mode=TwoWay}"
+                                    ToolTip="{Binding DataContext.T[ShowInTray], RelativeSource={RelativeSource AncestorType=Window}}"
                                     Style="{StaticResource MetricToggleStyle}" />
                         </Grid>
-                        <TextBlock Text="{Binding Temperature}"
-                                   Foreground="{DynamicResource AccentBrush}"
-                                   FontFamily="Consolas"
-                                   FontSize="32"
-                                   FontWeight="SemiBold"
-                                   Margin="0,8,0,0"
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding Temperature}"
+                                   Style="{StaticResource MetricValueAccentStyle}"
                                    AutomationProperties.Name="{Binding TemperatureLabel}" />
-                      </StackPanel>
+                        <ProgressBar Grid.Row="2"
+                                     Value="{Binding Temperature, Mode=OneWay, Converter={StaticResource MetricToDoubleConverter}}"
+                                     Style="{StaticResource MetricProgressBarStyle}" />
+                      </Grid>
                     </Border>
                   </Grid>
 
-                  <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
-                    <TextBlock Text="{Binding Source}"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               FontFamily="Consolas"
-                               FontSize="12"
-                               TextWrapping="Wrap" />
+                  <!-- 底層感測器來源標記 -->
+                  <Border Grid.Row="2" Style="{StaticResource DeviceFooterBorderStyle}">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="SENSOR: " Style="{StaticResource SensorPrefixTextStyle}" />
+                      <TextBlock Text="{Binding Source}" Style="{StaticResource SensorSourceTextStyle}" />
+                    </StackPanel>
                   </Border>
                 </Grid>
               </Border>
@@ -251,6 +290,7 @@
       </StackPanel>
     </ScrollViewer>
 
+    <!-- 狀態警示與提示面板 -->
     <Border x:Name="StatusPanel"
             Grid.Row="3"
             Margin="0,14,0,0"
@@ -259,16 +299,18 @@
             BorderThickness="1"
             CornerRadius="12"
             Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"
-            AutomationProperties.LiveSetting="Polite">
+            AutomationProperties.LiveSetting="Polite"
+            SnapsToDevicePixels="True">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="4" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
         <Border Background="{DynamicResource AccentBrush}" CornerRadius="11,0,0,11" />
-        <StackPanel Grid.Column="1" Margin="14,12">
+        <StackPanel Grid.Column="1" Margin="16,12">
           <TextBlock Text="{Binding StatusMessage}"
                      Foreground="{DynamicResource TextSecondaryBrush}"
+                     FontSize="13"
                      TextWrapping="Wrap" />
           <TextBlock Margin="0,8,0,0"
                      Visibility="{Binding IsDriverActionVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -283,27 +325,51 @@
 
     <Border Grid.Row="4"
             Height="1"
-            Margin="0,18,0,0"
-            Background="{DynamicResource BorderBrush}" />
+            Margin="0,16,0,0"
+            Background="{DynamicResource BorderSubtleBrush}" />
 
-    <WrapPanel x:Name="SettingsPanel" Grid.Row="5" Margin="0,14,0,0" VerticalAlignment="Center">
-      <CheckBox Content="{Binding T[StartWithWindows]}"
-                IsChecked="{Binding StartWithWindows}"
-                Margin="0,0,22,0" />
-      <CheckBox Content="{Binding T[HideWhenClosed]}"
-                IsChecked="{Binding HideWhenClosed}"
-                Margin="0,0,22,0" />
-      <TextBlock Text="{Binding T[Language]}"
-                 Foreground="{DynamicResource TextSecondaryBrush}"
-                 VerticalAlignment="Center"
-                 Margin="0,0,8,0" />
-      <ComboBox Width="145"
-                SelectedValuePath="Tag"
-                SelectedValue="{Binding Language}"
-                AutomationProperties.Name="{Binding T[Language]}">
-        <ComboBoxItem Tag="zh-TW">繁體中文</ComboBoxItem>
-        <ComboBoxItem Tag="en-US">English</ComboBoxItem>
-      </ComboBox>
-    </WrapPanel>
+    <!-- 整合式底部設定控制面板 -->
+    <Border x:Name="SettingsPanel"
+            Grid.Row="5"
+            Margin="0,14,0,0"
+            Background="{DynamicResource FooterBrush}"
+            BorderBrush="{DynamicResource FooterBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="16,10"
+            SnapsToDevicePixels="True">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 左側：啟動與最小化選項 -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <CheckBox Content="{Binding T[StartWithWindows]}"
+                    IsChecked="{Binding StartWithWindows}"
+                    Margin="0,0,24,0" />
+          <CheckBox Content="{Binding T[HideWhenClosed]}"
+                    IsChecked="{Binding HideWhenClosed}"
+                    Margin="0,0,16,0" />
+        </StackPanel>
+
+        <!-- 右側：語言下拉選單 -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="{Binding T[Language]}"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     VerticalAlignment="Center"
+                     FontSize="13"
+                     Margin="0,0,8,0" />
+          <ComboBox Width="135"
+                    SelectedValuePath="Tag"
+                    SelectedValue="{Binding Language}"
+                    AutomationProperties.Name="{Binding T[Language]}">
+            <ComboBoxItem Tag="zh-TW">繁體中文</ComboBoxItem>
+            <ComboBoxItem Tag="en-US">English</ComboBoxItem>
+          </ComboBox>
+        </StackPanel>
+      </Grid>
+    </Border>
   </Grid>
 </Window>

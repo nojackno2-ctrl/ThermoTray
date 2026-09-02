@@ -5,20 +5,33 @@
   <Application.Resources>
     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
     <local:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
+    <local:MetricToDoubleConverter x:Key="MetricToDoubleConverter" />
 
-    <!-- The colors are kept separate from the brushes so high-contrast mode can replace
-         the semantic brushes without changing any control templates. -->
-    <Color x:Key="WindowColor">#171A1F</Color>
-    <Color x:Key="PanelColor">#1D2229</Color>
-    <Color x:Key="SurfaceColor">#232A33</Color>
-    <Color x:Key="SurfaceHoverColor">#2B343F</Color>
-    <Color x:Key="SurfacePressedColor">#313C49</Color>
-    <Color x:Key="BorderColor">#3D4856</Color>
-    <Color x:Key="AccentColor">#45C9A8</Color>
-    <Color x:Key="AccentTextColor">#171A1F</Color>
-    <Color x:Key="TextPrimaryColor">#F3F6F8</Color>
-    <Color x:Key="TextSecondaryColor">#B7C1CC</Color>
-    <Color x:Key="TextMutedColor">#8E9BAA</Color>
+    <!-- 語意化調色盤：支援 Windows 高對比無障礙模式動態切換 -->
+    <Color x:Key="WindowColor">#0B0E14</Color>
+    <Color x:Key="PanelColor">#131822</Color>
+    <Color x:Key="SurfaceColor">#1A212D</Color>
+    <Color x:Key="SurfaceHoverColor">#222B3A</Color>
+    <Color x:Key="SurfacePressedColor">#2A3547</Color>
+    <Color x:Key="BorderColor">#242E3D</Color>
+    <Color x:Key="BorderSubtleColor">#1B2330</Color>
+    <Color x:Key="AccentColor">#2DD4BF</Color>
+    <Color x:Key="AccentGlowColor">#14B8A6</Color>
+    <Color x:Key="AccentTextColor">#0B0E14</Color>
+    <Color x:Key="TextPrimaryColor">#F0F6FC</Color>
+    <Color x:Key="TextSecondaryColor">#94A3B8</Color>
+    <Color x:Key="TextMutedColor">#64748B</Color>
+
+    <!-- 輔助裝飾色彩 -->
+    <Color x:Key="IconBadgeColor">#14202E</Color>
+    <Color x:Key="IconBadgeBorderColor">#24364D</Color>
+    <Color x:Key="VersionBadgeColor">#161F2C</Color>
+    <Color x:Key="VersionBadgeBorderColor">#26354B</Color>
+    <Color x:Key="FooterColor">#0F131C</Color>
+    <Color x:Key="FooterBorderColor">#1E2635</Color>
+    <Color x:Key="TrackColor">#242F3F</Color>
+    <Color x:Key="BadgeBackgroundColor">#102827</Color>
+    <Color x:Key="BadgeBorderColor">#1D4A46</Color>
 
     <SolidColorBrush x:Key="WindowBrush" Color="{StaticResource WindowColor}" />
     <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
@@ -26,17 +39,30 @@
     <SolidColorBrush x:Key="SurfaceHoverBrush" Color="{StaticResource SurfaceHoverColor}" />
     <SolidColorBrush x:Key="SurfacePressedBrush" Color="{StaticResource SurfacePressedColor}" />
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="{StaticResource BorderSubtleColor}" />
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentGlowBrush" Color="{StaticResource AccentGlowColor}" />
     <SolidColorBrush x:Key="AccentTextBrush" Color="{StaticResource AccentTextColor}" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}" />
     <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}" />
 
+    <SolidColorBrush x:Key="IconBadgeBrush" Color="{StaticResource IconBadgeColor}" />
+    <SolidColorBrush x:Key="IconBadgeBorderBrush" Color="{StaticResource IconBadgeBorderColor}" />
+    <SolidColorBrush x:Key="VersionBadgeBrush" Color="{StaticResource VersionBadgeColor}" />
+    <SolidColorBrush x:Key="VersionBadgeBorderBrush" Color="{StaticResource VersionBadgeBorderColor}" />
+    <SolidColorBrush x:Key="FooterBrush" Color="{StaticResource FooterColor}" />
+    <SolidColorBrush x:Key="FooterBorderBrush" Color="{StaticResource FooterBorderColor}" />
+    <SolidColorBrush x:Key="TrackBrush" Color="{StaticResource TrackColor}" />
+    <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="{StaticResource BadgeBackgroundColor}" />
+    <SolidColorBrush x:Key="BadgeBorderBrush" Color="{StaticResource BadgeBorderColor}" />
+
+    <!-- 鍵盤焦點可視化外框 -->
     <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}">
       <Setter Property="Control.Template">
         <Setter.Value>
           <ControlTemplate>
-            <Border Margin="-3"
+            <Border Margin="-2"
                     BorderBrush="{DynamicResource AccentBrush}"
                     BorderThickness="2"
                     CornerRadius="6"
@@ -48,30 +74,136 @@
       </Setter>
     </Style>
 
+    <!-- 全域文字渲染優化 -->
     <Style TargetType="{x:Type TextBlock}">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
       <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
       <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
     </Style>
 
+    <!-- 現代化硬體裝置卡片外框 (DevicePanelStyle) -->
     <Style x:Key="DevicePanelStyle" TargetType="{x:Type Border}">
       <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="12" />
-      <Setter Property="Padding" Value="20" />
+      <Setter Property="Padding" Value="18,16" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
+    <!-- 現代化指標晶片磁貼 (MetricPanelStyle) -->
     <Style x:Key="MetricPanelStyle" TargetType="{x:Type Border}">
       <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="Padding" Value="14,12" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
+    <!-- 硬體識別微型徽章樣式 -->
+    <Style x:Key="DeviceBadgeStyle" TargetType="{x:Type Border}">
+      <Setter Property="Background" Value="{DynamicResource BadgeBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BadgeBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="7,2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,12,0" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="DeviceBadgeTextStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="DeviceNameTextStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="MetricLabelStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="MetricValuePrimaryStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI" />
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,8,0,8" />
+    </Style>
+
+    <Style x:Key="MetricValueAccentStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI" />
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,8,0,8" />
+    </Style>
+
+    <!-- 微型動態進度量表 (ProgressBar) 樣式 -->
+    <Style x:Key="MetricProgressBarStyle" TargetType="{x:Type ProgressBar}">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="Minimum" Value="0" />
+      <Setter Property="Maximum" Value="100" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ProgressBar}">
+            <Border Background="{DynamicResource TrackBrush}" CornerRadius="2" Height="{TemplateBinding Height}">
+              <Grid x:Name="TemplateRoot" SnapsToDevicePixels="True">
+                <Border x:Name="PART_Track" />
+                <Border x:Name="PART_Indicator"
+                        HorizontalAlignment="Left"
+                        Background="{DynamicResource AccentBrush}"
+                        CornerRadius="2" />
+              </Grid>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 卡片底部中繼資料邊框 -->
+    <Style x:Key="DeviceFooterBorderStyle" TargetType="{x:Type Border}">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="0,10,0,0" />
+      <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+
+    <Style x:Key="SensorPrefixTextStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SensorSourceTextStyle" TargetType="{x:Type TextBlock}">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- 現代化標準 CheckBox（底部設定列使用） -->
     <Style TargetType="{x:Type CheckBox}">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
       <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="MinHeight" Value="28" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Template">
         <Setter.Value>
@@ -89,7 +221,8 @@
                       Background="{DynamicResource SurfaceBrush}"
                       BorderBrush="{DynamicResource BorderBrush}"
                       BorderThickness="1"
-                      CornerRadius="4">
+                      CornerRadius="4"
+                      SnapsToDevicePixels="True">
                 <Path x:Name="CheckMark"
                       Data="M 2,8 L 6,12 L 14,3"
                       Margin="1"
@@ -117,7 +250,7 @@
                 <Setter TargetName="CheckBoxBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="CheckBoxBorder" Property="Opacity" Value="0.72" />
+                <Setter TargetName="CheckBoxBorder" Property="Opacity" Value="0.75" />
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.45" />
@@ -129,13 +262,55 @@
       </Setter>
     </Style>
 
-    <Style x:Key="MetricToggleStyle" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource {x:Type CheckBox}}">
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-      <Setter Property="FontSize" Value="12" />
-      <Setter Property="MinHeight" Value="26" />
+    <!-- 現代化微型膠囊開關 (MetricToggleStyle)：取代冗長的「顯示在工具列」核取方塊 -->
+    <Style x:Key="MetricToggleStyle" TargetType="{x:Type CheckBox}">
+      <Setter Property="Cursor" Value="Hand" />
       <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type CheckBox}">
+            <Border x:Name="ToggleTrack"
+                    Width="30"
+                    Height="16"
+                    Background="{DynamicResource TrackBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    SnapsToDevicePixels="True">
+              <Grid>
+                <Border x:Name="ToggleThumb"
+                        Width="10"
+                        Height="10"
+                        Margin="2,0,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource TextSecondaryBrush}"
+                        CornerRadius="5" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="ToggleTrack" Property="Background" Value="{DynamicResource AccentBrush}" />
+                <Setter TargetName="ToggleTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                <Setter TargetName="ToggleThumb" Property="HorizontalAlignment" Value="Right" />
+                <Setter TargetName="ToggleThumb" Property="Margin" Value="0,0,2,0" />
+                <Setter TargetName="ToggleThumb" Property="Background" Value="{DynamicResource AccentTextBrush}" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ToggleTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+                <Setter Property="Cursor" Value="Arrow" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
 
+    <!-- 下拉選單按鈕樣式 -->
     <Style x:Key="ComboDropDownButtonStyle" TargetType="{x:Type ToggleButton}">
       <Setter Property="Focusable" Value="False" />
       <Setter Property="Background" Value="Transparent" />
@@ -143,9 +318,12 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="{x:Type ToggleButton}">
-            <Border Background="{TemplateBinding Background}" CornerRadius="0,8,8,0">
-              <Path Data="M 0,0 L 5,5 L 10,0 Z"
-                    Fill="{DynamicResource TextSecondaryBrush}"
+            <Border Background="{TemplateBinding Background}" CornerRadius="0,6,6,0">
+              <Path Data="M 1,1 L 5,5 L 9,1"
+                    Stroke="{DynamicResource TextSecondaryBrush}"
+                    StrokeThickness="1.5"
+                    StrokeStartLineCap="Round"
+                    StrokeEndLineCap="Round"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center" />
             </Border>
@@ -154,13 +332,14 @@
       </Setter>
     </Style>
 
+    <!-- 現代化 ComboBox 下拉選單 -->
     <Style TargetType="{x:Type ComboBox}">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
       <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Padding" Value="10,7" />
-      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MinHeight" Value="32" />
       <Setter Property="MaxDropDownHeight" Value="260" />
       <Setter Property="Template">
         <Setter.Value>
@@ -170,7 +349,8 @@
                       Background="{TemplateBinding Background}"
                       BorderBrush="{TemplateBinding BorderBrush}"
                       BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="8">
+                      CornerRadius="6"
+                      SnapsToDevicePixels="True">
                 <Grid>
                   <ContentPresenter x:Name="ContentSite"
                                     Margin="{TemplateBinding Padding}"
@@ -181,7 +361,7 @@
                                     ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
                                     TextElement.Foreground="{TemplateBinding Foreground}" />
                   <ToggleButton x:Name="DropDownToggle"
-                                Width="34"
+                                Width="28"
                                 HorizontalAlignment="Right"
                                 IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                                 Style="{StaticResource ComboDropDownButtonStyle}" />
@@ -202,7 +382,7 @@
                           Background="{DynamicResource PanelBrush}"
                           BorderBrush="{DynamicResource BorderBrush}"
                           BorderThickness="1"
-                          CornerRadius="8"
+                          CornerRadius="6"
                           Padding="4">
                     <ScrollViewer CanContentScroll="True">
                       <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
@@ -238,13 +418,13 @@
     <Style TargetType="{x:Type ComboBoxItem}">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Padding" Value="10,6" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="{x:Type ComboBoxItem}">
             <Border x:Name="ItemBorder"
                     Background="{TemplateBinding Background}"
-                    CornerRadius="6"
+                    CornerRadius="4"
                     Padding="{TemplateBinding Padding}">
               <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                 VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
