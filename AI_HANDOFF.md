@@ -1,5 +1,54 @@
 # AI handoff
 
+## 2026-08-31 modern obsidian tech UI redesign (complete, uncommitted)
+
+- User reported that the previous UI was unappealing and dated ("我覺得UI很醜").
+- Performed a comprehensive redesign into a modern **Windows 11 Fluent Dark / Obsidian Tech Instrument** panel:
+  - Replaced the dull flat gray background with deep obsidian layers (`#0B0E14` window, `#131822` device card, `#1A212D` metric surface, `#242E3D` 1px crisp borders).
+  - Modernized typography with Segoe UI Variable Display / Segoe UI Variable Text and clean numeric hierarchy.
+  - Added hardware chip identification badges (`[ CPU ]` / `[ GPU 0 ]`) with glowing accent borders.
+  - Replaced cluttered repeated "顯示在工具列" checkbox text with sleek modern 30x16 micro capsule switches (`MetricToggleStyle`) with tooltips, maintaining full two-way binding with `ShowCpuUsageInTray`, `ShowCpuTemperatureInTray`, `ShowUsageInTray`, and `ShowTemperatureInTray`.
+  - Introduced `MetricToDoubleConverter` and integrated 4px slim dynamic level gauge bars (`MetricProgressBarStyle`) beneath usage (0~100%) and temperature metrics.
+  - Polished the header with a glowing squircle app icon container and modern version badge pill.
+  - Replaced the bottom settings section with an integrated footer toolbar (`SettingsPanel`).
+- Added unit tests in `tests/ThermoTray.Tests/MetricToDoubleConverterTests.cs` (14 new tests) covering numeric parsing, clamping, comma handling, and unavailable/invalid string fallback.
+- Validation:
+  - `dotnet build ThermoTray.sln --configuration Release`: passed with 0 warnings and 0 errors.
+  - `dotnet test ThermoTray.sln --configuration Release`: passed all 166/166 tests.
+  - `dotnet format ThermoTray.sln --verify-no-changes`: passed with no changes.
+- Per collaboration rules, no commit, push, or release was executed.
+
+## 2026-08-13 GitHub upload (complete)
+
+- User authorized uploading the complete current verified worktree, including the WPF redesign and installer-experience hardening. Scope is this repository only.
+- Remote audit after `fetch --prune --tags` found local `main` and `origin/main` identical with no other pre-existing branches. Initial source commit `96da297` was pushed to `agent/ui-installer-experience`; Draft PR #6 targets `main`: https://github.com/nojackno2-ctrl/ThermoTray/pull/6
+- GitHub connector PR creation returned `403 Resource not accessible by integration`; the authenticated host `gh pr create` fallback succeeded. A final handoff-only commit records the completed remote state on the same PR branch.
+- This authorization does not include a GitHub Release, tag, installer execution, or installed-application update.
+
+## 2026-08-13 installer experience hardening (complete, uncommitted)
+
+- Scope is limited to `installer/ThermoTray.iss` and a new installer contract test; the concurrent uncommitted WPF redesign remains preserved and untouched.
+- The installer now always creates Start Menu application/uninstall shortcuts with a stable AppUserModelID and `{app}` working directory; the desktop shortcut remains optional and defaults unchecked.
+- Added previous-install preference reuse, setup/uninstall logging, explicit uninstall identity/version fields, GitHub support/update metadata, installed README/LICENSE files, and matching bilingual README guidance for manual Start/Taskbar pinning. The existing AppMutex handover and `CloseApplications=no` safety design are preserved.
+- First test compile failed only because this test project does not enable implicit `System`/`System.IO` imports and the new standalone test omitted them. The imports were added before the successful rerun; no product or installer failure was observed.
+- Verification after correction: Release build passed with 0 warnings/errors, tests passed 152/152, formatting passed, self-contained publish passed, and `mt.exe` verified the embedded `requireAdministrator` manifest. Inno Setup 6.7.3 compiled the installer and the canonical release packaging regenerated `SHA256SUMS.txt`. Final installer: `artifacts/release/ThermoTray-Setup-1.1.7.exe`, 54,036,016 bytes, SHA-256 `920018D3F19E4CEAD2B617079D7CF2B2BD0F1C9275CADA4A399DBC313E862686`, file version 1.1.7.
+- No installer was executed, no installed application was updated, and no commit/push/release was performed.
+
+## 2026-08-13 taste-skill UI redesign
+
+- Scope is a UI-only targeted evolution of the elevated WPF monitor. The sensor pipeline, availability rules, multi-GPU identity, polling cadence, tray rendering, and persisted per-metric tray visibility are explicitly preserved.
+- Design Read: a trustworthy, compact Windows hardware instrument panel for everyday users and diagnostics. Dials are `DESIGN_VARIANCE 4`, `MOTION_INTENSITY 2`, and `VISUAL_DENSITY 8`; native WPF remains the only design system and no dependency is being added.
+- Existing audit: the cool dark palette used separate mint CPU and blue GPU accents, generic rounded cards, cramped two-column CPU/GPU composition, repeated tiny tray toggles, a visually weak status line, mixed corner radii, and no explicit high-contrast palette. Information architecture is sound and remains header, live devices, contextual status/action, and preferences.
+- Implemented one restrained mint accent, neutral device identity, full-width device rows with paired usage/temperature metrics, consistent 12 px panel and 8 px control radii, clearer focus/hover/pressed/disabled states, scroll-safe multi-GPU layout, contextual status panel, and runtime high-contrast resource switching. Empty status text collapses the status panel; actionable/error states remain contextual and use polite UI Automation live announcements.
+- `MainWindow.xaml` keeps every existing binding and tray visibility toggle. It caps the live-device surface at 560 px with vertical scrolling, so a second or later GPU no longer makes the whole window exceed the work area. Numeric readings use the installed Consolas monospace face while interface copy uses Segoe UI Variable Text/Segoe UI. No package or font dependency was added.
+- Added `StringToVisibilityConverter` and expanded the rendered-window layout contract with scroll-safety, dense minimum-width, single-accent, and radius assertions. Release build passed with 0 warnings/errors; all 150 tests passed; `dotnet format --verify-no-changes` and `git diff --check` passed. The first sandboxed build was blocked from the user's NuGet config; the host build then exposed ambiguous `SystemColors` because WinForms and WPF are both enabled, which was fixed with explicit `System.Windows.SystemColors` references before the clean build.
+- Visual scope is verified through the existing STA rendered-window tests, not by an inspected desktop screenshot. The shipped app requires elevation, and no UAC/elevated live launch was performed, so actual high-contrast switching, live hardware values, tray visuals/order, and desktop-scale appearance remain unverified in this pass.
+
+## 2026-08-12 v1.1.7 publication and installed update
+
+- Published GitHub Release `v1.1.7` from `e222bdea567951b2e5df7a0710f08ee1f02b2d66`; branch Build and tag Release succeeded. Downloaded digests: ZIP `B36D4FB1...91E11EC`, Setup `70A42B87...5331A`.
+- Updated the installation from `1.1.6` to `1.1.7` through an elevated helper. Installed product version is `1.1.7+e222bdea567951b2e5df7a0710f08ee1f02b2d66`; exactly one elevated process remained responsive. No fresh sensor/UI correctness claim was made.
+
 ## 2026-08-12 v1.1.7 release-consistency baseline
 
 - Baseline was inspected before edits: clean `main` at `fb4d6e1`, tracking `origin/main`, with no uncommitted diff. `AGENTS.md`, this handoff, and the latest eight commits were reviewed.
@@ -343,5 +392,13 @@ Findings and what each one changed. None of them reproduced on this machine's ow
 - The first package run exposed stale-output leakage (`ThermoTray.running.exe`) and checksums from older versions. The script now validates cleanup targets, clears publish and the exact release directory, excludes running/backup/old/temp outputs from the archive, and hashes only current-version assets.
 - Corrected pre-commit assets: portable ZIP contains 8 expected files and no stale running executable; ZIP SHA-256 `47F5653BE7CAE19BB9E0800591A440420665186707A2916FE0ADE2BA4A8B5DEB`; Setup SHA-256 `6823B36DA9665E25365B12E97612F7C3B9DAC5A9307D29E083D94AB9FB57361C`.
 - Notification-area ordering and fresh elevated hardware/UI behavior were not revalidated in this pass; prior v1.1.5 hardware evidence remains the latest live proof.
+
+## 2026-08-13 installed software update verification
+
+- Silently updated the current-user installation with `artifacts\release\ThermoTray-Setup-1.1.7.exe`; the installer returned exit code `0` and did not request a reboot.
+- Installed executable: `%LOCALAPPDATA%\Programs\ThermoTray\ThermoTray.exe`; FileVersion `1.1.7.0`, ProductVersion `1.1.7+acef9fb0781f2d6a7f9a4c995aba7843efad56a8`, SHA-256 `9ED1C1773A93415184B07772FFCB1CC025A4A51F6D9EEE6668A047645B663D91`. It is byte-for-byte identical to the current publish output.
+- Verified the registered version, install location, uninstall command, project/issues/update URLs, and the Start Menu launch/uninstall shortcuts. Removed the stale duplicate root-level `ThermoTray.lnk`; the current program-group shortcut remains valid.
+- Launched the exact installed executable with elevation; PID `39000` reported `Responding=True`. This verifies elevated launch and process responsiveness only; sensor correctness and fresh visual behavior were not revalidated.
+- The user's authorization in this milestone covers updating installed software; this handoff entry is not yet committed or pushed.
 
 
