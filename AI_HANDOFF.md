@@ -1,5 +1,20 @@
 # AI handoff
 
+## 2026-10-14 Antigravity: automatic commit and push to GitHub policy
+
+- User authorized automatic local commits and automatic push to GitHub for all projects; AGENTS.md now records the standing policy. A Git post-commit hook has been installed in `.git/hooks/post-commit` to automatically push the current branch to `origin` upon commit. Destructive operations (force-push, release, merge, rebase, reset, branch deletion) still require separate authorization.
+- Evidence: inspected branches, git remotes, and status across all repositories. Verified hook execution on Windows Git. Pushed existing unpushed commits where applicable.
+- Verification: git status clean, post-commit hook configured and tested, collaboration rules updated.
+- Status: auto-push policy established and active.
+
+## 2026-10-05 Codex: automatic local commit policy
+
+- User authorized automatic local commits without further confirmation; AGENTS.md now records the standing policy. Push/release/history changes require separate authorization.
+- Evidence: inspected branch, git status, git diff, and git log; reviewed collaboration rules and handoff. The initial working tree was clean; this task changes collaboration documentation only.
+- Verification: full staged git diff --cached --check passed; automatic commit wording and remaining authorization limits were checked. Documentation-only work; no build/runtime validation was needed.
+- Status: automatic commit policy established; this record accompanies the authorized local snapshot. No build/test or runtime behavior is claimed by this snapshot task.
+
+
 ## 2026-08-31 modern obsidian tech UI redesign (complete, uncommitted)
 
 - User reported that the previous UI was unappealing and dated ("我覺得UI很醜").
