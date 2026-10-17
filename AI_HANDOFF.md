@@ -1,5 +1,14 @@
 # AI handoff
 
+## 2026-10-17 Codex: desktop Rust/release audit completed
+
+- Scope: feasibility/release evidence only; initial tree clean. No source/version/workflow edits, commit/push/merge/prune/branch deletion/tag/publish, installs or security changes.
+- Evidence: fetch origin (no prune), ls-remote heads/tags, all local/remote branch ancestry, gh release/assets/CI and source manifests reviewed. main 2b030270d7e0e89eded0cac027db42e9fd7cd5dc equals origin/main; no other branches. v1.1.8 tag 5c72409b102b7e81ca34a35bf595242f38c98f51 is ancestor; only collaboration docs differ. Release targetCommitish 55ee3175cd93065400f57970a4dcb7fa32f055f6 differs from current tag but both trees equal 2ead786970cf3b0a5e0fe82ea834e60b8a92ee11. Restore/build/format/publish pass; 0 warnings/errors, 166 tests; mt.exe verifies requireAdministrator. Audit EXE publish/audit-2026-10-17/ThermoTray.exe SHA256 2B3226ECE5C8227C93AF775ECC2A7B0709D1960C97EE44025E28CBEB4A79AD6B. HEAD CI full packaging success; local Inno unavailable, no new Setup or ZIP created, cleanup-based package.ps1 not run. Rust sensor parity depends on replacing managed LHM/PawnIO; retaining it via sidecar is partial migration. Keep v1.1.8; optional next rebuild version 1.1.9.
+- All four are non-Rust; no tracked Cargo manifests or Rust source. New build candidates are unsigned and unpublished. Downloaded latest checksum metadata verified where releases exist; no remote full-binary rehash or fresh interactive UI/hook/GPU/sensor/installer acceptance claimed.
+- Detailed commands, digests, migration risks, blockers and release decisions: D:/Github/audit-desktop-2026-10-17.md. All own checks finished; no live process handles. Only this handoff changed in tracked files; preserve earlier notes.
+
+- 2026-10-17 Codex parent verification: downloaded all current release assets; every SHA256 matches GitHub digest. Evidence: D:/Github/release-audit-2026-10-17/ThermoTray/verification.json. No executable source change requires a new version.
+
 ## 2026-10-14 Antigravity: automatic commit and push to GitHub policy
 
 - User authorized automatic local commits and automatic push to GitHub for all projects; AGENTS.md now records the standing policy. A Git post-commit hook has been installed in `.git/hooks/post-commit` to automatically push the current branch to `origin` upon commit. Destructive operations (force-push, release, merge, rebase, reset, branch deletion) still require separate authorization.
