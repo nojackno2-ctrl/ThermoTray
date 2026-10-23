@@ -5,24 +5,20 @@
     Canonical release-quality PowerShell packaging and verification path used locally and in CI
     (.github/workflows/build.yml and release.yml).
     Execution steps:
-    1. Read and validate Directory.Build.props version, Inno Setup fallback version, and Git tag guard.
-    2. dotnet restore for runtime (win-x64).
-    3. dotnet build (Release).
-    4. dotnet test (unit test suite).
-    5. dotnet format --verify-no-changes.
-    6. dotnet publish (self-contained single-file).
-    7. mt.exe verification of embedded requireAdministrator manifest.
-    8. Inno Setup (ISCC.exe) installer compilation.
-    9. Portable ZIP packaging (PDB excluded).
-    10. SHA256 checksum generation (SHA256SUMS.txt).
+    1. Read the product version from Cargo.toml and validate the Inno Setup default and Git tag guard.
+    2. cargo fmt --check, cargo clippy (warnings are errors), and cargo test.
+    3. cargo build --release for the Rust application (ThermoTray.exe).
+    4. dotnet format --verify-no-changes for the .NET sensor sidecar.
+    5. dotnet publish of the sidecar (self-contained single file, ThermoTray.Sensors.exe) next to ThermoTray.exe.
+    6. mt.exe verification of the embedded requireAdministrator manifest.
+    7. Inno Setup (ISCC.exe) installer compilation.
+    8. Portable ZIP packaging (PDB excluded).
+    9. SHA256 checksum generation (SHA256SUMS.txt).
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
     [string]$Tag,
-
-    [Parameter(Mandatory = $false)]
-    [string]$Configuration = 'Release',
 
     [Parameter(Mandatory = $false)]
     [string]$Runtime = 'win-x64',
@@ -46,9 +42,6 @@ param(
     [switch]$SkipFormat,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipRestore,
-
-    [Parameter(Mandatory = $false)]
     [switch]$SkipBuild,
 
     [Parameter(Mandatory = $false)]
@@ -61,18 +54,30 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Write-Host "==> Repository root: $repoRoot" -ForegroundColor Cyan
 
-# 1. Resolve product version from Directory.Build.props
-$propsPath = Join-Path $repoRoot 'Directory.Build.props'
-if (-not (Test-Path -LiteralPath $propsPath)) {
-    throw "Directory.Build.props not found at: $propsPath"
+# 1. Resolve product version from Cargo.toml ([package] version)
+$cargoPath = Join-Path $repoRoot 'Cargo.toml'
+if (-not (Test-Path -LiteralPath $cargoPath)) {
+    throw "Cargo.toml not found at: $cargoPath"
 }
 
-[xml]$propsXml = Get-Content -LiteralPath $propsPath
-$version = $propsXml.Project.PropertyGroup.Version
-if ([string]::IsNullOrWhiteSpace($version)) {
-    throw "Version is not defined in Directory.Build.props"
+$inPackage = $false
+$version = $null
+foreach ($line in Get-Content -LiteralPath $cargoPath) {
+    if ($line -match '^\s*\[(.+)\]\s*$') {
+        $inPackage = ($matches[1] -eq 'package')
+        continue
+    }
+    if ($inPackage -and $line -match '^\s*version\s*=\s*"([^"]+)"') {
+        $version = $matches[1].Trim()
+        break
+    }
 }
-$version = $version.Trim()
+if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "Version is not defined in the [package] section of Cargo.toml"
+}
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Cargo.toml version '$version' must be MAJOR.MINOR.PATCH for Windows file versions"
+}
 Write-Host "==> Resolved product version: $version" -ForegroundColor Green
 
 # 2. Verify Inno Setup script default version agreement
@@ -82,9 +87,9 @@ if (Test-Path -LiteralPath $issPath) {
     if ($issContent -match '#define\s+AppVersion\s+"([^"]+)"') {
         $issVersion = $matches[1]
         if ($issVersion -ne $version) {
-            throw "Inno Setup installer default AppVersion '$issVersion' does not match Directory.Build.props version '$version'"
+            throw "Inno Setup installer default AppVersion '$issVersion' does not match Cargo.toml version '$version'"
         }
-        Write-Host "==> Inno Setup default AppVersion matches Directory.Build.props ($version)" -ForegroundColor Green
+        Write-Host "==> Inno Setup default AppVersion matches Cargo.toml ($version)" -ForegroundColor Green
     } else {
         throw "Could not find '#define AppVersion' in $issPath"
     }
@@ -105,7 +110,7 @@ if ([string]::IsNullOrWhiteSpace($resolvedTag)) {
 if (-not [string]::IsNullOrWhiteSpace($resolvedTag)) {
     $expectedTag = "v$version"
     if ($resolvedTag -ne $expectedTag) {
-        throw "Git tag '$resolvedTag' does not match Directory.Build.props version '$version' (expected '$expectedTag')"
+        throw "Git tag '$resolvedTag' does not match Cargo.toml version '$version' (expected '$expectedTag')"
     }
     Write-Host "==> Tag-version guard verified: $resolvedTag == $expectedTag" -ForegroundColor Green
 }
@@ -117,8 +122,7 @@ if ($env:GITHUB_ENV -and (Test-Path -LiteralPath $env:GITHUB_ENV)) {
     Write-Host "==> Exported AppVersion and ReleaseTag to GITHUB_ENV" -ForegroundColor DarkGray
 }
 
-$solutionPath = Join-Path $repoRoot 'ThermoTray.sln'
-$projectPath = Join-Path $repoRoot 'src/ThermoTray/ThermoTray.csproj'
+$sidecarProject = Join-Path $repoRoot 'sensors/ThermoTray.Sensors/ThermoTray.Sensors.csproj'
 $publishDir = Join-Path $repoRoot "publish/$Runtime"
 $artifactsDir = Join-Path $repoRoot 'artifacts'
 $installerOutputDir = Join-Path $artifactsDir 'installer'
@@ -141,46 +145,59 @@ function Remove-ValidatedDirectory {
     }
 }
 
-# 5. Restore win-x64 asset graph
-if (-not $SkipRestore) {
-    Write-Host "==> Restoring solution for runtime: $Runtime..." -ForegroundColor Cyan
-    & dotnet restore $solutionPath --runtime $Runtime
-    if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
+# 5. Rust formatting, lints, and unit/integration tests
+Push-Location $repoRoot
+try {
+    if (-not $SkipFormat) {
+        Write-Host "==> Verifying Rust formatting..." -ForegroundColor Cyan
+        & cargo fmt --all -- --check
+        if ($LASTEXITCODE -ne 0) { throw "cargo fmt check failed with exit code $LASTEXITCODE" }
+
+        Write-Host "==> Running Clippy (warnings are errors)..." -ForegroundColor Cyan
+        & cargo clippy --all-targets --locked -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed with exit code $LASTEXITCODE" }
+
+        Write-Host "==> Verifying sensor sidecar formatting..." -ForegroundColor Cyan
+        & dotnet format $sidecarProject --verify-no-changes --verbosity minimal
+        if ($LASTEXITCODE -ne 0) { throw "dotnet format check failed with exit code $LASTEXITCODE" }
+    }
+
+    if (-not $SkipTests) {
+        Write-Host "==> Running Rust tests..." -ForegroundColor Cyan
+        & cargo test --locked
+        if ($LASTEXITCODE -ne 0) { throw "cargo test failed with exit code $LASTEXITCODE" }
+    }
+
+    # 6. Build the Rust application
+    if (-not $SkipBuild) {
+        Write-Host "==> Building ThermoTray.exe (release)..." -ForegroundColor Cyan
+        & cargo build --release --locked
+        if ($LASTEXITCODE -ne 0) { throw "cargo build failed with exit code $LASTEXITCODE" }
+    }
+} finally {
+    Pop-Location
 }
 
-# 6. Build Release configuration
-if (-not $SkipBuild) {
-    Write-Host "==> Building solution ($Configuration)..." -ForegroundColor Cyan
-    & dotnet build $solutionPath --configuration $Configuration --no-restore
-    if ($LASTEXITCODE -ne 0) { throw "dotnet build failed with exit code $LASTEXITCODE" }
-}
-
-# 7. Execute unit tests
-if (-not $SkipTests) {
-    Write-Host "==> Running unit tests ($Configuration)..." -ForegroundColor Cyan
-    & dotnet test $solutionPath --configuration $Configuration --no-build --no-restore
-    if ($LASTEXITCODE -ne 0) { throw "dotnet test failed with exit code $LASTEXITCODE" }
-}
-
-# 8. Verify code formatting
-if (-not $SkipFormat) {
-    Write-Host "==> Verifying code formatting..." -ForegroundColor Cyan
-    & dotnet format $solutionPath --verify-no-changes --no-restore --verbosity minimal
-    if ($LASTEXITCODE -ne 0) { throw "dotnet format check failed with exit code $LASTEXITCODE" }
-}
-
-# 9. Publish self-contained single-file application
+# 7. Publish the sensor sidecar and stage both executables
 if (-not $SkipPublish) {
-    Write-Host "==> Publishing self-contained application ($Runtime)..." -ForegroundColor Cyan
+    Write-Host "==> Publishing sensor sidecar ($Runtime)..." -ForegroundColor Cyan
     Remove-ValidatedDirectory -Path $publishDir -ExpectedParent (Join-Path $repoRoot 'publish')
     New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
-    & dotnet publish $projectPath --configuration $Configuration --runtime $Runtime --self-contained true -p:PublishSingleFile=true --no-restore --output $publishDir
+    & dotnet publish $sidecarProject --configuration Release --runtime $Runtime --self-contained true -p:PublishSingleFile=true "-p:Version=$version" --output $publishDir
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+
+    $builtExe = Join-Path $repoRoot 'target/release/ThermoTray.exe'
+    if (-not (Test-Path -LiteralPath $builtExe)) {
+        throw "Rust executable not found at: $builtExe"
+    }
+    Copy-Item -LiteralPath $builtExe -Destination $publishDir -Force
 }
 
 $exePath = Join-Path $publishDir 'ThermoTray.exe'
-if (-not (Test-Path -LiteralPath $exePath)) {
-    throw "Published executable not found at: $exePath"
+foreach ($required in @($exePath, (Join-Path $publishDir 'ThermoTray.Sensors.exe'))) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "Published executable not found at: $required"
+    }
 }
 
 # 10. Verify embedded requireAdministrator manifest
@@ -211,7 +228,7 @@ if (-not $SkipManifestCheck) {
     New-Item -ItemType Directory -Force -Path $verificationDir | Out-Null
     $manifestXmlPath = Join-Path $verificationDir 'manifest.xml'
 
-    & $resolvedMt "-inputresource:$exePath;#1" "-out:$manifestXmlPath"
+    & $resolvedMt -nologo "-inputresource:$exePath;#1" "-out:$manifestXmlPath"
     if ($LASTEXITCODE -ne 0) { throw "mt.exe extraction failed with exit code $LASTEXITCODE" }
 
     $manifest = Get-Content -LiteralPath $manifestXmlPath -Raw

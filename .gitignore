@@ -1,4 +1,5 @@
 # Build output
+target/
 [Bb]in/
 [Oo]bj/
 artifacts/

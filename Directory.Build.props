@@ -1,7 +1,9 @@
 <Project>
+  <!--
+    Shared settings for the .NET sensor sidecar. The product version lives in Cargo.toml;
+    scripts/package.ps1 passes it to dotnet publish as -p:Version.
+  -->
   <PropertyGroup>
-    <!-- Single source of truth for the product version. The installer and CI read it from here. -->
-    <Version>1.1.8</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

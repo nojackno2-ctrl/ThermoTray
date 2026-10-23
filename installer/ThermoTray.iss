@@ -1,14 +1,17 @@
 ; Inno Setup 安裝檔建置腳本
-; 建置步驟：
-; 1. 先執行自包含發行發布 (Self-contained Publish)：
-;    dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -o .\publish\win-x64
-; 2. 呼叫 ISCC 進行編譯：
-;    ISCC.exe /DAppVersion=1.1.8 .\installer\ThermoTray.iss
+; 建置步驟（scripts/package.ps1 會自動完成）：
+; 1. 建置 Rust 主程式並複製至發布目錄：
+;    cargo build --release
+;    copy .\target\release\ThermoTray.exe .\publish\win-x64\
+; 2. 發布 .NET 感測器 sidecar（自包含單一檔）至同一個目錄：
+;    dotnet publish .\sensors\ThermoTray.Sensors\ThermoTray.Sensors.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\publish\win-x64
+; 3. 呼叫 ISCC 進行編譯：
+;    ISCC.exe /DAppVersion=2.0.0 .\installer\ThermoTray.iss
 
 #define AppName "ThermoTray"
 ; 可由 CI 或命令列參數 /DAppVersion=<version> 覆蓋預設版本號
 #ifndef AppVersion
-  #define AppVersion "1.1.8"
+  #define AppVersion "2.0.0"
 #endif
 #define AppPublisher "ThermoTray"
 #define AppURL "https://github.com/nojackno2-ctrl/ThermoTray"
@@ -61,8 +64,16 @@ RestartApplications=no
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[InstallDelete]
+; 1.x（C# / WPF）單一檔發布留下的原生 DLL；2.0 起改為 Rust 主程式加 .NET 感測器 sidecar，升級時一併移除
+Type: files; Name: "{app}\D3DCompiler_47_cor3.dll"
+Type: files; Name: "{app}\PenImc_cor3.dll"
+Type: files; Name: "{app}\PresentationNative_cor3.dll"
+Type: files; Name: "{app}\vcruntime140_cor3.dll"
+Type: files; Name: "{app}\wpfgfx_cor3.dll"
+
 [Files]
-; 包含發布目錄下的所有檔案（排除 .pdb 偵錯檔）
+; 包含發布目錄下的所有檔案：ThermoTray.exe（Rust）與 ThermoTray.Sensors.exe（.NET sidecar），排除 .pdb 偵錯檔
 Source: "..\publish\win-x64\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

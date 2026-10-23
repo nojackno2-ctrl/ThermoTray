@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      Sensor sidecar for the Rust ThermoTray executable. It owns LibreHardwareMonitor and PawnIO,
+      which have no Rust equivalent, and answers line-based requests on stdin/stdout.
+      WinExe keeps a console window from flashing; the parent always redirects stdio.
+    -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>ThermoTray.Sensors</AssemblyName>
+    <RootNamespace>ThermoTray.Sensors</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\ThermoTray.ico</ApplicationIcon>
+    <!-- A sidecar allocates almost nothing between samples; workstation non-concurrent GC keeps it lean. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Started once per session, so a compressed single file matters more than ReadyToRun startup time. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+  </ItemGroup>
+</Project>

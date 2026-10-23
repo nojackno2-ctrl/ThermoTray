@@ -21,6 +21,14 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      # The application is Rust; the .NET SDK above only builds the LibreHardwareMonitor sensor sidecar.
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          cargo --version
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
 

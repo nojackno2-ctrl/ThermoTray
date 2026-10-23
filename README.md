@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/nojackno2-ctrl/ThermoTray?color=blue&label=最新版本)](https://github.com/nojackno2-ctrl/ThermoTray/releases)
 [![Platform](https://img.shields.io/badge/平台-Windows%2010%20%7C%2011%20(x64)-0078D6?logo=windows)](https://github.com/nojackno2-ctrl/ThermoTray)
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/授權-MIT-green)](https://github.com/nojackno2-ctrl/ThermoTray)
 
 [繁體中文](#繁體中文) | [English](#english)
@@ -41,7 +41,7 @@
 - ⚡ **極致輕量與節能優化**
   - **智慧取樣率**：主視窗開啟時每 1 秒取樣一次；縮小至系統匣常駐時自動降為每 2 秒一次，進一步降低 CPU 與筆電電池消耗。
   - **超低記憶體佔用**：停用底層 LibreHardwareMonitor 預設的 1 天歷史紀錄快取，杜絕常駐長時間運作下的記憶體膨脹。
-  - **低資源繪製**：感測器拓撲快取、全域重複使用 GDI+ 筆刷與字型控制代碼，僅在顯示整數變化時重繪圖示。
+  - **低資源繪製**：Rust 原生執行檔搭配 Direct2D / DirectWrite 繪圖，僅在顯示整數變化時重繪系統匣圖示。
 - 🔄 **智慧單一執行個體與平滑交接**
   - 透過具名管道（Named Pipes）實現版本感知協商。
   - 重複啟動時自動喚醒既有視窗至前景；若啟動較新版本，會提示一鍵關閉舊版並無縫接手系統匣。
@@ -90,14 +90,15 @@ PawnIO 基於安全性僅允許已提權（Elevated）的處理程序存取核�
    - 執行 `ThermoTray.exe`，在 UAC 提示視窗中點選「是」。
    - 等待 1～2 秒完成初次硬體感測器探測，CPU 與 GPU 卡片將顯示即時使用率與溫度。
 2. **系統匣圖示操作**：
-   - **按兩下圖示** 或 **按一下圖示**：喚醒主視窗。
+   - **按兩下圖示**（或以鍵盤選取圖示後按 Enter）：喚醒主視窗。
    - **右鍵點擊圖示**：開啟快顯功能表，可選擇「開啟 ThermoTray」或「結束」。
    - **滑鼠停留（Hover）**：顯示 Tooltip 浮動提示，包含裝置型號、目前使用率與溫度。
 3. **主視窗設定項目**：
-   - **顯示在工具列**（卡片內核取方塊）：個別控制是否在系統匣圖示上繪製該項目的數值。
+   - **顯示在工具列**（卡片內的膠囊開關）：個別控制是否在系統匣圖示上繪製該項目的數值。
    - **隨 Windows 啟動**：註冊開機免 UAC 的最高權限登入工作排程。
    - **關閉時縮小至系統匣**：點擊主視窗右上角關閉鈕 `X` 時，不結束程式，改為隱藏至系統匣。
    - **語言切換**：提供「繁體中文」與「English」即時切換。
+   - 主視窗可用 `Tab` / `Shift+Tab` 移動焦點、`空白鍵` / `Enter` 切換；卡片過多時可用滑鼠滾輪捲動。
 
 ---
 
@@ -133,11 +134,22 @@ ThermoTray 預設在註冊時將 CPU 圖示置於左側、GPU 置於右側。但
 
 ### 🛠️ 開發與建置
 
+#### 架構
+
+自 2.0.0 起，ThermoTray 主程式以 **Rust** 重寫：
+
+| 元件 | 語言 | 職責 |
+| :--- | :--- | :--- |
+| `ThermoTray.exe` | Rust（Win32 + Direct2D / DirectWrite） | 主視窗、系統匣圖示、設定、單一執行個體與版本交接、開機啟動排程、感測器挑選與 GPU 配對規則 |
+| `ThermoTray.Sensors.exe` | C#（.NET 8，自包含單一檔） | 僅透過 LibreHardwareMonitor / PawnIO 讀取原始感測器樹，以 stdin/stdout 單行 JSON 回傳 |
+
+LibreHardwareMonitor 與 PawnIO 沒有 Rust 對等實作，因此感測器讀取保留在精簡的 .NET sidecar 中；它不做任何挑選或估算，所有「不使用推測數值」的判斷都在 Rust 端完成。sidecar 由主程式啟動並繼承其管理員權限，主程式結束時會一併終止。設定檔、具名管道協定與開機排程皆與 1.x 版相容，可直接覆蓋升級。
+
 #### 環境需求
 
 - Windows 10 / 11 (x64)
-- .NET 8.0 SDK 或更新版本
-- Visual Studio 2022（包含「.NET 桌面開發」工作負載）
+- Rust 1.85 以上（`x86_64-pc-windows-msvc` 工具鏈，含 Windows SDK 的 `rc.exe`）
+- .NET 8.0 SDK（建置感測器 sidecar）
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php)（如需編譯安裝檔）
 
 #### 建置步驟
@@ -147,21 +159,18 @@ ThermoTray 預設在註冊時將 CPU 圖示置於左側、GPU 置於右側。但
 git clone https://github.com/nojackno2-ctrl/ThermoTray.git
 cd ThermoTray
 
-# 2. 執行單元測試（涵蓋感測器排序、有效性判定、托盤排版與語系字串）
-dotnet test .\ThermoTray.sln -c Release
+# 2. 執行單元測試（涵蓋感測器排序、有效性判定、托盤排版與繪製、具名管道交接、設定相容性與語系字串）
+cargo test
 
-# 3. 發布 win-x64 單一獨立執行檔
-dotnet restore .\ThermoTray.sln -r win-x64
-dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --no-restore -o .\publish\win-x64
+# 3. 建置主程式與感測器 sidecar
+cargo build --release
+dotnet publish .\sensors\ThermoTray.Sensors\ThermoTray.Sensors.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\publish\win-x64
 
-# 4. 編譯 Inno Setup 安裝檔 (輸出至 artifacts\installer\)
-& "C:\Users\$env:USERNAME\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=1.1.7 .\installer\ThermoTray.iss
-
-# 或一鍵執行標準發行封裝與驗證腳本：
+# 或一鍵執行標準發行封裝與驗證腳本（測試、格式、Clippy、發布、資訊清單驗證、安裝檔與 ZIP）：
 .\scripts\package.ps1
 ```
 
-> **版本號管理**：全專案的版本號單一來源為 `Directory.Build.props` 中的 `<Version>`，安裝指令碼與 GitHub Actions 自動建置流程皆自動讀取此處。
+> **版本號管理**：全專案的版本號單一來源為 `Cargo.toml` 的 `version`，安裝指令碼、sidecar 與 GitHub Actions 自動建置流程皆自動讀取此處。
 
 ---
 
@@ -195,7 +204,7 @@ Our core philosophy: **Strictly display physical hardware telemetry. Never fabri
 - ⚡ **Ultra-Low Resource Footprint**
   - **Dynamic Sampling**: 1-second interval when the main window is open; automatically switches to 2 seconds when minimized to the tray to conserve CPU cycles and battery life.
   - **Zero Sensor History**: Disabled LibreHardwareMonitor's 1-day value history buffer to prevent long-term memory growth.
-  - **Efficient Redraws**: Topology caching, reused GDI+ brushes and font handles, redrawing tray icons only when integer values change.
+  - **Efficient Redraws**: Native Rust executable drawing with Direct2D / DirectWrite; tray icons are redrawn only when integer values change.
 - 🔄 **Smart Single-Instance & Smooth Handover**
   - Named-pipe IPC version negotiation.
   - Re-launching brings the running window to the foreground. Launching a newer build offers a seamless one-click takeover.
@@ -238,13 +247,17 @@ Visit the [GitHub Releases Page](https://github.com/nojackno2-ctrl/ThermoTray/re
 
 ### 🛠️ Build from Source
 
+Since 2.0.0 the application is written in **Rust** (Win32, Direct2D and DirectWrite): window, tray icons, settings, single-instance hand-over, the elevated startup task, and all sensor selection and per-GPU pairing rules. LibreHardwareMonitor and PawnIO have no Rust equivalent, so raw sensor access stays in a small self-contained .NET 8 sidecar, `ThermoTray.Sensors.exe`, which only reports the raw sensor tree as JSON lines over stdin/stdout and never selects or estimates values. Settings, the named-pipe protocol and the startup task stay compatible with 1.x, so 2.0 installs over an existing version.
+
+Requires Rust 1.85+ (MSVC toolchain with the Windows SDK), the .NET 8 SDK, and Inno Setup 6 for the installer.
+
 ```powershell
 # Run unit tests
-dotnet test .\ThermoTray.sln -c Release
+cargo test
 
-# Publish self-contained single-file binary
-dotnet restore .\ThermoTray.sln -r win-x64
-dotnet publish .\src\ThermoTray\ThermoTray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --no-restore -o .\publish\win-x64
+# Build the application and the sensor sidecar
+cargo build --release
+dotnet publish .\sensors\ThermoTray.Sensors\ThermoTray.Sensors.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\publish\win-x64
 
 # Or run the unified packaging & verification script:
 .\scripts\package.ps1

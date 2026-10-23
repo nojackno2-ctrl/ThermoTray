@@ -1,0 +1,36 @@
+// Windows resources for ThermoTray.exe. build.rs expands the @VERSION...@ placeholders from Cargo.toml
+// into OUT_DIR, so the icon and manifest paths are resolved against @ASSETS@.
+#include <winres.h>
+
+1 ICON "@ASSETS@/ThermoTray.ico"
+// requireAdministrator: PawnIO only serves elevated processes.
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@ASSETS@/app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @VERSION_MAJOR@, @VERSION_MINOR@, @VERSION_PATCH@, 0
+PRODUCTVERSION  @VERSION_MAJOR@, @VERSION_MINOR@, @VERSION_PATCH@, 0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "ThermoTray"
+      VALUE "FileDescription", "ThermoTray"
+      VALUE "FileVersion", "@VERSION@"
+      VALUE "InternalName", "ThermoTray"
+      VALUE "LegalCopyright", "MIT License"
+      VALUE "OriginalFilename", "ThermoTray.exe"
+      VALUE "ProductName", "ThermoTray"
+      VALUE "ProductVersion", "@VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END
