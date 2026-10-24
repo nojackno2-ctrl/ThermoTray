@@ -1011,7 +1011,10 @@ impl App {
             }
         }
 
-        self.fit_window_to_content(true);
+        // 隱藏時仍更新讀值與系統匣；版面量測、調窗與重繪延至再次顯示。
+        if unsafe { IsWindowVisible(self.hwnd) }.as_bool() {
+            self.fit_window_to_content(true);
+        }
     }
 
     fn tray_event(&mut self, wparam: WPARAM, lparam: LPARAM) {
@@ -1039,8 +1042,9 @@ impl App {
         }
 
         unsafe {
+            // 隱藏期間的 GPU 清單或狀態文字可能改變內容高度，顯示前先同步。
+            self.fit_window_to_content(false);
             if !self.shown_once {
-                self.fit_window_to_content(false);
                 self.center_on_screen();
                 self.shown_once = true;
             }
@@ -1226,4 +1230,95 @@ fn write_sensor_diagnostics() {
     };
     // 無主控台的視窗程式；寫入失敗時只能忽略
     let _ = std::fs::write(output, content);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Graphics::Gdi::{GetUpdateRect, ValidateRect};
+
+    #[test]
+    fn hidden_poll_skips_layout_and_invalidation_then_refreshes_on_show() {
+        // 使用獨立執行緒與螢幕外視窗，不啟動輪詢、系統匣或讀寫真實設定。
+        std::thread::spawn(|| unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().expect("初始化 COM");
+            let d2d = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None).expect("建立 D2D");
+            let dwrite = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).expect("建立 DirectWrite");
+            let wic = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).expect("建立 WIC");
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("ThermoTray 測試"),
+                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                -30000,
+                -30000,
+                100,
+                100,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("建立隱藏測試視窗");
+            struct TestWindow(HWND);
+            impl Drop for TestWindow {
+                fn drop(&mut self) {
+                    unsafe {
+                        let _ = DestroyWindow(self.0);
+                    }
+                }
+            }
+            let window = TestWindow(hwnd);
+            let (sender, receiver) = mpsc::channel();
+            let mut app = App {
+                hwnd,
+                state: MainState::new(Default::default(), ".".into()),
+                settings_service: SettingsService::at(
+                    std::env::temp_dir().join("ThermoTray-unused-test-settings.json"),
+                ),
+                resources: Resources::new(d2d, dwrite, wic).expect("建立繪圖資源"),
+                palette: Palette::current(),
+                surface: WindowSurface::new(),
+                tray: None,
+                renderer: None,
+                interaction: Interaction::default(),
+                hits: Vec::new(),
+                scroll: 0.0,
+                cards_content_height: 0.0,
+                cards_viewport_height: 0.0,
+                receiver,
+                poller: None,
+                coordinator: None,
+                startup_request_version: Arc::new(AtomicU64::new(0)),
+                startup_gate: Arc::new(Mutex::new(())),
+                shutting_down: false,
+                shown_once: true,
+                tracking_mouse: false,
+                taskbar_created: 0,
+                tooltip: None,
+                tooltip_text: Vec::new(),
+                gpu_icons_built: false,
+            };
+            let _ = ValidateRect(Some(hwnd), None);
+            let mut before = RECT::default();
+            GetWindowRect(hwnd, &mut before).expect("讀取原視窗大小");
+            sender.send(PollMessage::Error("SensorError")).expect("傳送輪詢結果");
+            app.drain_poll_results();
+            assert_eq!(app.state.status_message, app.state.t("SensorError"));
+            assert!(app.hits.is_empty(), "隱藏輪詢不應量測或建立控制項版面");
+            assert!(!GetUpdateRect(hwnd, None, false).as_bool(), "隱藏輪詢不應 invalidation");
+            let mut after = RECT::default();
+            GetWindowRect(hwnd, &mut after).expect("讀取輪詢後大小");
+            assert_eq!(before, after, "隱藏輪詢不應調窗");
+            app.show_main_window();
+            assert!(!app.hits.is_empty(), "再次顯示必須同步最新狀態的版面");
+            assert!(IsWindowVisible(hwnd).as_bool());
+            assert!(GetUpdateRect(hwnd, None, false).as_bool());
+            drop(app);
+            drop(window);
+            windows::Win32::System::Com::CoUninitialize();
+        })
+        .join()
+        .expect("視窗回歸測試");
+    }
 }

@@ -1,5 +1,13 @@
 # AI handoff
 
+## 2026-10-24 Codex：背景更新與 sidecar 通訊修正（已驗證，本機提交）
+
+- 基線：`main`／`33476d5`，`git status --short` 與差異皆空；已讀協作規則與交接。父代理透過 `agent-delegation-tools` 委派有限修正，再獨立檢查差異與重跑驗證；子代理不提交。依使用者最新規則僅做本機提交，單次略過自動推送 hook，不推送遠端。
+- 已確認並修正：`drain_poll_results` 隱藏時仍量測版面、調窗與 invalidation；改為僅更新狀態／系統匣，重新顯示前同步版面。sidecar 同步 `read_line` 可永久阻塞；改以 `PeekNamedPipe` 確認可讀資料，加入 10 秒期限與 4 MiB 回應上限，失敗沿用既有終止／10 秒重啟退避。
+- 佐證：依序 `cargo check`、`cargo test`（89 個單元＋5 個安裝契約，全部通過）、`cargo build`、`cargo fmt --all`、`cargo clippy --all-targets -- -D warnings` 成功；另 `cargo fmt --all -- --check` 與 `git diff --check` 通過。工具鏈 `rustc 1.99.0`／`x86_64-pc-windows-msvc`，無連結錯誤。
+- 新增 5 個回歸測試：使用獨立螢幕外 Win32 視窗驗證隱藏時狀態仍更新、控制項版面／視窗矩形／更新區不變，以及重新顯示時同步；匿名管道驗證沉默／半行逾時、分段 UTF-8＋CRLF、缺換行 EOF、超限及無效 UTF-8。測試不啟動真實 sidecar，也不讀寫真實設定。
+- 限制：未量測 CPU／耗電改善，未驗證實際硬體初始化能否在 10 秒內完成、真實 sidecar 卡住後的端到端重啟、DPI／系統匣視覺或安裝行為；本次只限制回應讀取，既有同步 stdin 寫入與關閉等待策略未變。子代理初次 Shell 沙箱建立失敗後重試成功；父代理亦已獨立重跑全部檢查。僅修改 `src/app.rs`、`src/sensors.rs` 與本頂端紀錄，保留歷史；本機提交，不推送、不安裝、不修改真實設定。
+
 ## 2026-10-23 Claude: application rewritten in Rust (v2.0.0)
 
 - User asked to rewrite ThermoTray in Rust and chose (1) "Rust main program + .NET sensor sidecar" and (2) "replace the C# version directly". The C# WPF app (`src/ThermoTray`, `tests/`, `ThermoTray.sln`) is removed; version bumped to 2.0.0 with `Cargo.toml` as the single version source (installer default, CI, sidecar `-p:Version`).

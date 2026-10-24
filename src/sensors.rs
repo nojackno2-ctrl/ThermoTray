@@ -4,7 +4,8 @@
 //! 忠實回傳原始感測器樹；本模組負責所有挑選、排序與 GPU 配對規則。
 //! 嚴格遵循「不使用假資料、不使用估算數值」：沒有可信讀值時一律回報無法取得。
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
+use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -418,7 +419,7 @@ impl std::fmt::Display for SensorError {
 struct Sidecar {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: ChildStdout,
     _job: crate::win::KillOnCloseJob,
 }
 
@@ -440,7 +441,7 @@ impl Sidecar {
         let job = crate::win::KillOnCloseJob::assign(&child);
         let stdin = child.stdin.take().ok_or_else(|| SensorError::Launch("stdin unavailable".into()))?;
         let stdout = child.stdout.take().ok_or_else(|| SensorError::Launch("stdout unavailable".into()))?;
-        Ok(Sidecar { child, stdin, stdout: BufReader::new(stdout), _job: job })
+        Ok(Sidecar { child, stdin, stdout, _job: job })
     }
 
     fn request(&mut self, command: &str) -> Result<String, SensorError> {
@@ -449,13 +450,53 @@ impl Sidecar {
             .and_then(|()| self.stdin.flush())
             .map_err(|error| SensorError::Io(error.to_string()))?;
 
-        let mut line = String::new();
-        let read = self.stdout.read_line(&mut line).map_err(|error| SensorError::Io(error.to_string()))?;
-        if read == 0 {
-            return Err(SensorError::Io("the sidecar exited".into()));
+        read_response(&mut self.stdout, RESPONSE_TIMEOUT, MAX_RESPONSE_BYTES)
+    }
+}
+
+/// 包含首次硬體初始化的等待期限；通訊失敗會沿用既有的終止與重啟退避流程。
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
+fn read_response(
+    stdout: &mut (impl Read + AsRawHandle),
+    timeout: Duration,
+    maximum_bytes: usize,
+) -> Result<String, SensorError> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+
+    let deadline = Instant::now() + timeout;
+    let mut line = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        // 即使持續收到沒有換行的片段，也不能無限延長期限或累積記憶體。
+        if Instant::now() >= deadline {
+            return Err(SensorError::Io("等待 sidecar 回應逾時".into()));
+        }
+        let mut available = 0;
+        unsafe { PeekNamedPipe(HANDLE(stdout.as_raw_handle()), None, 0, None, Some(&mut available), None) }
+            .map_err(|error| SensorError::Io(error.to_string()))?;
+        if available == 0 {
+            std::thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())));
+            continue;
         }
 
-        Ok(line)
+        // 管道只有此處讀取；僅讀取已確認可用的位元組，避免同步 Read 再次卡住。
+        let count = (available as usize).min(buffer.len());
+        let read = stdout.read(&mut buffer[..count]).map_err(|error| SensorError::Io(error.to_string()))?;
+        if read == 0 {
+            return Err(SensorError::Io("sidecar 已結束".into()));
+        }
+        let end = buffer[..read].iter().position(|byte| *byte == b'\n').map(|index| index + 1);
+        let bytes = &buffer[..end.unwrap_or(read)];
+        if line.len() + bytes.len() > maximum_bytes {
+            return Err(SensorError::Protocol("sidecar 回應超過大小上限".into()));
+        }
+        line.extend_from_slice(bytes);
+        if end.is_some() {
+            return String::from_utf8(line).map_err(|error| SensorError::Protocol(error.to_string()));
+        }
     }
 }
 
@@ -576,6 +617,62 @@ fn sidecar_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response_pipe() -> (std::fs::File, std::fs::File) {
+        use std::os::windows::io::FromRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Pipes::CreatePipe;
+
+        let mut read = HANDLE::default();
+        let mut write = HANDLE::default();
+        unsafe {
+            CreatePipe(&mut read, &mut write, None, 0).expect("建立測試管道");
+            (std::fs::File::from_raw_handle(read.0), std::fs::File::from_raw_handle(write.0))
+        }
+    }
+
+    #[test]
+    fn response_waits_for_newline_and_preserves_fragmented_utf8() {
+        let (mut read, mut write) = response_pipe();
+        let writer = std::thread::spawn(move || {
+            let bytes = "{\"name\":\"測試\"}\r\n".as_bytes();
+            write.write_all(&bytes[..11]).expect("寫入第一段");
+            std::thread::sleep(Duration::from_millis(30));
+            write.write_all(&bytes[11..]).expect("寫入第二段");
+        });
+        let result = read_response(&mut read, Duration::from_secs(2), 1024);
+        writer.join().expect("等待管道寫入");
+        assert_eq!(result.expect("讀取完整回應"), "{\"name\":\"測試\"}\r\n");
+    }
+
+    #[test]
+    fn response_times_out_with_an_open_silent_or_partial_pipe() {
+        for bytes in [&b""[..], &b"{\"hardware\":"[..]] {
+            let (mut read, mut write) = response_pipe();
+            write.write_all(bytes).expect("寫入未完成回應");
+            let started = Instant::now();
+            let result = read_response(&mut read, Duration::from_millis(40), 1024);
+            assert!(matches!(result, Err(SensorError::Io(message)) if message.contains("逾時")));
+            assert!(started.elapsed() < Duration::from_secs(2), "管道仍開啟時也必須返回");
+        }
+    }
+
+    #[test]
+    fn response_rejects_eof_without_newline() {
+        let (mut read, mut write) = response_pipe();
+        write.write_all(b"{}").expect("寫入未終止行");
+        drop(write);
+        assert!(matches!(read_response(&mut read, Duration::from_secs(2), 1024), Err(SensorError::Io(_))));
+    }
+
+    #[test]
+    fn response_limits_unterminated_data_and_rejects_invalid_utf8() {
+        for bytes in [&b"0123456789"[..], &b"\xff\n"[..]] {
+            let (mut read, mut write) = response_pipe();
+            write.write_all(bytes).expect("寫入無效回應");
+            assert!(matches!(read_response(&mut read, Duration::from_secs(2), 8), Err(SensorError::Protocol(_))));
+        }
+    }
 
     fn sensor(kind: &str, name: &str, value: Option<f32>) -> RawSensor {
         RawSensor { kind: kind.into(), name: name.into(), value }
